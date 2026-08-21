@@ -38,6 +38,7 @@ ones:
 | `caddy_snippets` | `{}` | Named reusable Caddy snippets (see below) |
 | `caddy_acme_email` | `""` | ACME contact for Let's Encrypt |
 | `caddy_acme_dns` | `""` | Global DNS-01 provider + args (`acme_dns <value>`). Needed for wildcard certs and split-horizon/internal HTTPS |
+| `caddy_global_extra` | `""` | Raw directives injected verbatim into the global options block (e.g. a clustered `storage` backend) |
 | `caddy_systemd_env` | `{}` | Env vars injected via a systemd drop-in |
 | `caddy_metrics_bind` | `""` | Bind address for the metrics server. `""` disables it |
 | `caddy_metrics_port` | `9090` | Metrics server port |
@@ -48,8 +49,15 @@ ones:
 ```yaml
 caddy_sites:
   - host: "app.example.com"          # required — public hostname
-    upstream: "10.0.0.5:8080"        # required — backend host:port
+    upstream: "10.0.0.5:8080"        # required — backend host:port, space-separated for several
     upstream_tls_skip_verify: true    # optional — proxy over HTTPS to a self-signed upstream
+    lb_policy: round_robin            # optional — policy across multiple upstreams
+    lb_retries: 2                     # optional — retries against other upstreams
+    health_uri: /healthz              # optional — enables ACTIVE health checks
+    health_interval: 10s              # optional — probe frequency (default 30s)
+    health_timeout: 3s                # optional — per-probe timeout
+    health_status: 2xx                # optional — acceptable status (default 200)
+    fail_duration: 30s                # optional — how long a failed upstream stays out
     access_log: true                  # optional — JSON access log under caddy_log_dir
     allow_ips:                        # optional — whole-site allowlist (403 otherwise)
       - 203.0.113.10
@@ -72,6 +80,13 @@ caddy_sites:
   `transport http { tls_insecure_skip_verify }` block, so Caddy accepts a
   self-signed or hostname-mismatched backend cert (e.g. Proxmox on `:8006`, PBS
   on `:8007`). Omit it (default `false`) for the plain `reverse_proxy`.
+- `lb_policy` / `lb_retries` / `health_*` / `fail_duration` → emitted inside the
+  `reverse_proxy` block. `health_uri` is the one worth setting deliberately:
+  without it Caddy only learns an upstream is down by failing a real request at
+  it, so the first user after a backend dies eats the error. With it Caddy polls
+  out of band and pulls the backend before that happens. `fail_duration` is the
+  passive counterpart — how long an upstream that failed a live request stays out
+  of rotation (Caddy's default of `0` means passive checks are off entirely).
 - `access_log: true` → the role pre-creates `{{ caddy_log_dir }}/<host>.access.log`
   as `caddy:caddy` before reload and configures the site to write JSON access
   logs there.

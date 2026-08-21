@@ -10,6 +10,9 @@
         metrics
     }
 {% endif %}
+{% if caddy_global_extra %}
+{{ caddy_global_extra | indent(4, first=True) }}
+{% endif %}
 }
 
 {% for name, body in (caddy_snippets | default({})).items() %}
@@ -83,11 +86,24 @@
 {% if site.extra_directives is defined %}
 {{ site.extra_directives | indent(4, first=True) }}
 {% endif %}
-{% if site.upstream_tls_skip_verify | default(false) %}
+{% set rp_opts = [] %}
+{% if site.lb_policy is defined %}{% set _ = rp_opts.append('lb_policy ' ~ site.lb_policy) %}{% endif %}
+{% if site.lb_retries is defined %}{% set _ = rp_opts.append('lb_retries ' ~ site.lb_retries) %}{% endif %}
+{% if site.health_uri is defined %}{% set _ = rp_opts.append('health_uri ' ~ site.health_uri) %}{% endif %}
+{% if site.health_interval is defined %}{% set _ = rp_opts.append('health_interval ' ~ site.health_interval) %}{% endif %}
+{% if site.health_timeout is defined %}{% set _ = rp_opts.append('health_timeout ' ~ site.health_timeout) %}{% endif %}
+{% if site.health_status is defined %}{% set _ = rp_opts.append('health_status ' ~ site.health_status) %}{% endif %}
+{% if site.fail_duration is defined %}{% set _ = rp_opts.append('fail_duration ' ~ site.fail_duration) %}{% endif %}
+{% if rp_opts or site.upstream_tls_skip_verify | default(false) %}
     reverse_proxy {{ site.upstream }} {
+{% for opt in rp_opts %}
+        {{ opt }}
+{% endfor %}
+{% if site.upstream_tls_skip_verify | default(false) %}
         transport http {
             tls_insecure_skip_verify
         }
+{% endif %}
     }
 {% else %}
     reverse_proxy {{ site.upstream }}

@@ -74,13 +74,52 @@ caddy_acme_email: ""
 #   caddy_acme_dns: "cloudflare {env.CF_API_TOKEN}"
 caddy_acme_dns: ""
 
+# Raw Caddyfile directives injected verbatim into the global options block,
+# for global options this role does not model explicitly. Multi-line ok.
+#
+# The clustering case this exists for: two Caddy nodes behind one floating IP
+# cannot both answer an ACME challenge, because only the node currently
+# holding the IP receives the request. Pointing both at one shared storage
+# backend gives them a common certificate store and a common issuance lock, so
+# whichever node holds the IP issues and both serve the result. Requires the
+# matching storage module compiled in via caddy_install_method: xcaddy.
+#
+#   caddy_install_method: xcaddy
+#   caddy_extra_modules: [github.com/pberkel/caddy-storage-redis]
+#   caddy_global_extra: |
+#     storage redis {
+#         address 10.0.0.5:6379
+#         password "{{ vault_redis_password }}"
+#         db 3
+#     }
+caddy_global_extra: ""
+
 # ----------------------------------------------------------------------------
 # Sites
 # ----------------------------------------------------------------------------
 
 # List of reverse-proxy sites. Each entry supports:
 #   host:             required — public hostname
-#   upstream:         required — backend address (host:port)
+#   upstream:         required — backend address (host:port). Several,
+#                                space-separated, makes this a load-balanced
+#                                site; see lb_policy below.
+#   lb_policy:        optional — Caddy load balancing policy across multiple
+#                                upstreams (round_robin, least_conn, ip_hash,
+#                                cookie, ...). Default is Caddy's own (random).
+#   health_uri:       optional — path for ACTIVE health checks. Without it
+#                                Caddy only marks an upstream down after a
+#                                request to it has already failed (passive),
+#                                so the first user after a backend dies eats
+#                                the error. With it, Caddy polls out of band
+#                                and takes the backend out before that.
+#   health_interval:  optional — how often to poll (default 30s)
+#   health_timeout:   optional — per-probe timeout
+#   health_status:    optional — acceptable status, e.g. 2xx (default 200)
+#   fail_duration:    optional — how long a passively-failed upstream stays
+#                                out of rotation (default 0 = passive checks
+#                                disabled)
+#   lb_retries:       optional — retries against other upstreams before giving
+#                                up on a request
 #   access_log:       optional — enable per-site JSON access log at
 #                                {{ caddy_log_dir }}/<host>.access.log
 #   allow_ips:        optional — whole-site IP allowlist (list of IPs/CIDRs)
