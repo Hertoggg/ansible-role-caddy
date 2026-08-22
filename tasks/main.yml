@@ -6,3 +6,11 @@
 - name: Run config tasks
   ansible.builtin.import_tasks: config.yml
   tags: [caddy, config]
+
+- name: Enable and start Caddy
+  ansible.builtin.systemd:
+    name: caddy
+    state: started
+    enabled: true
+    daemon_reload: true
+  tags: [caddy, install, config]
