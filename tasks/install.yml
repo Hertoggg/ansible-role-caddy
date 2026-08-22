@@ -182,10 +182,3 @@
     dest: /etc/systemd/system/caddy.service.d/override.conf
     mode: '0644'
   notify: restart caddy
-
-- name: Enable and start Caddy
-  ansible.builtin.systemd:
-    name: caddy
-    state: started
-    enabled: true
-    daemon_reload: true
