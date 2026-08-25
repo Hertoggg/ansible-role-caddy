@@ -175,12 +175,24 @@ caddy_global_extra: ""
 #                                and takes the backend out before that.
 #   health_interval:  optional — how often to poll (default 30s)
 #   health_timeout:   optional — per-probe timeout
+#   health_port:      optional — probe a different port than the upstream's
 #   health_status:    optional — acceptable status, e.g. 2xx (default 200)
+#   health_body:      optional — regexp the probe response body must match
 #   fail_duration:    optional — how long a passively-failed upstream stays
 #                                out of rotation (default 0 = passive checks
 #                                disabled)
+#   max_fails:        optional — failures within fail_duration before an
+#                                upstream is taken out (default 1)
+#   unhealthy_status: optional — statuses counted as a failure, e.g. [5xx]
+#   unhealthy_latency: optional — a response slower than this counts as a
+#                                failure
+#   unhealthy_request_count: optional — concurrent requests at which an
+#                                upstream counts as unhealthy
 #   lb_retries:       optional — retries against other upstreams before giving
 #                                up on a request
+#   lb_try_duration:  optional — how long to keep retrying other upstreams
+#                                before giving up on the request
+#   lb_try_interval:  optional — wait between those retries (default 250ms)
 #   access_log:       optional — enable per-site JSON access log at
 #                                {{ caddy_log_dir }}/<host>.access.log
 #   allow_ips:        optional — whole-site IP allowlist (list of IPs/CIDRs).

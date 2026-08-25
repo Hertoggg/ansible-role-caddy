@@ -76,16 +76,33 @@ argument_specs:
             type: str
           lb_retries:
             type: int
+          lb_try_duration:
+            type: str
+          lb_try_interval:
+            type: str
           health_uri:
             type: str
+          health_port:
+            type: int
           health_interval:
             type: str
           health_timeout:
             type: str
           health_status:
             type: str
+          health_body:
+            type: str
           fail_duration:
             type: str
+          max_fails:
+            type: int
+          unhealthy_status:
+            type: list
+            elements: str
+          unhealthy_latency:
+            type: str
+          unhealthy_request_count:
+            type: int
           upstream_tls_skip_verify:
             type: bool
           access_log:

@@ -91,13 +91,24 @@ http://{{ caddy_metrics_bind }}:{{ caddy_metrics_port }} {
 {{ site.extra_directives | indent(4, first=True) }}
 {% endif %}
 {% set rp_opts = [] %}
+{# Load balancing #}
 {% if site.lb_policy is defined %}{% set _ = rp_opts.append('lb_policy ' ~ site.lb_policy) %}{% endif %}
 {% if site.lb_retries is defined %}{% set _ = rp_opts.append('lb_retries ' ~ site.lb_retries) %}{% endif %}
+{% if site.lb_try_duration is defined %}{% set _ = rp_opts.append('lb_try_duration ' ~ site.lb_try_duration) %}{% endif %}
+{% if site.lb_try_interval is defined %}{% set _ = rp_opts.append('lb_try_interval ' ~ site.lb_try_interval) %}{% endif %}
+{# Active health checks: Caddy polls out of band #}
 {% if site.health_uri is defined %}{% set _ = rp_opts.append('health_uri ' ~ site.health_uri) %}{% endif %}
+{% if site.health_port is defined %}{% set _ = rp_opts.append('health_port ' ~ site.health_port) %}{% endif %}
 {% if site.health_interval is defined %}{% set _ = rp_opts.append('health_interval ' ~ site.health_interval) %}{% endif %}
 {% if site.health_timeout is defined %}{% set _ = rp_opts.append('health_timeout ' ~ site.health_timeout) %}{% endif %}
 {% if site.health_status is defined %}{% set _ = rp_opts.append('health_status ' ~ site.health_status) %}{% endif %}
+{% if site.health_body is defined %}{% set _ = rp_opts.append('health_body ' ~ site.health_body) %}{% endif %}
+{# Passive health checks: Caddy judges live request outcomes #}
 {% if site.fail_duration is defined %}{% set _ = rp_opts.append('fail_duration ' ~ site.fail_duration) %}{% endif %}
+{% if site.max_fails is defined %}{% set _ = rp_opts.append('max_fails ' ~ site.max_fails) %}{% endif %}
+{% if site.unhealthy_status is defined %}{% set _ = rp_opts.append('unhealthy_status ' ~ site.unhealthy_status | join(' ')) %}{% endif %}
+{% if site.unhealthy_latency is defined %}{% set _ = rp_opts.append('unhealthy_latency ' ~ site.unhealthy_latency) %}{% endif %}
+{% if site.unhealthy_request_count is defined %}{% set _ = rp_opts.append('unhealthy_request_count ' ~ site.unhealthy_request_count) %}{% endif %}
 {% if rp_opts or site.upstream_tls_skip_verify | default(false) %}
     reverse_proxy {{ site.upstream }} {
 {% for opt in rp_opts %}
