@@ -1,0 +1,78 @@
+---
+- name: Converge
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    # The apt path is what gets exercised here: an xcaddy scenario would mean a
+    # full Go toolchain download and Caddy compile per CI run, and the build is
+    # guarded by its own stamp logic rather than by anything Caddy-specific.
+    caddy_install_method: apt
+    caddy_acme_email: acme@example.invalid
+
+    # The sites below are addressed as http:// so they answer in plaintext on
+    # :80 and the verify playbook can reach them by Host header — a bare
+    # hostname would bind :443 with TLS enabled and reject plain requests, even
+    # with automatic HTTPS off. auto_https off is kept anyway: it proves
+    # caddy_global_extra reaches the global block, and it stops Caddy from
+    # trying to reach an ACME endpoint from a container with no network.
+    caddy_global_extra: |
+      auto_https off
+
+    caddy_systemd_env:
+      GODEBUG: tlsmlkem=0
+
+    caddy_metrics_bind: 127.0.0.1
+    caddy_metrics_allow_ips:
+      - 127.0.0.1/32
+
+    caddy_snippets:
+      compress: |
+        encode zstd gzip
+
+    # Upstreams point at closed ports on purpose: reaching reverse_proxy is
+    # what is being tested, not the backend, so a proxied request is expected
+    # to end in 502/503 while a blocked one ends in 403.
+    caddy_sites:
+      # Open site with a restricted sub-path, load balancing and health checks.
+      - host: http://open.example.invalid
+        upstream: 127.0.0.1:8081 127.0.0.1:8082
+        access_log: true
+        import_snippets: [compress]
+        lb_policy: ip_hash
+        lb_retries: 1
+        health_uri: /healthz
+        health_interval: 10s
+        health_timeout: 3s
+        health_status: 2xx
+        fail_duration: 30s
+        protected_paths:
+          - path: /admin/*
+            allow_ips:
+              - 192.0.2.10
+        extra_directives: |
+          header X-Role-Test open
+
+      # Allowlisted site that DOES include the test client. Everything below
+      # allow_ips must still apply — that combination used to be dropped.
+      - host: http://allowed.example.invalid
+        upstream: 127.0.0.1:8081
+        access_log: true
+        allow_ips:
+          - 127.0.0.1/32
+        import_snippets: [compress]
+        lb_policy: ip_hash
+        health_uri: /healthz
+        health_interval: 10s
+        fail_duration: 30s
+
+      # Allowlisted site that does NOT include the test client.
+      - host: http://denied.example.invalid
+        upstream: 127.0.0.1:8081
+        allow_ips:
+          - 192.0.2.0/24
+  roles:
+    # Absolute path to the repository root: the role resolves the same whether
+    # this runs from the setup repo's submodule checkout or from a standalone
+    # clone, without depending on what happens to be on the roles path.
+    - role: "{{ playbook_dir }}/../.."  # noqa: role-name[path]

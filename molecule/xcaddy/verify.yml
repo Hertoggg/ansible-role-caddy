@@ -1,0 +1,73 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Collect service facts
+      ansible.builtin.service_facts:
+
+    - name: Read the installed Caddy version
+      ansible.builtin.command: caddy version
+      changed_when: false
+      register: caddy_verify_version
+
+    - name: Read the compiled-in modules
+      ansible.builtin.command: caddy list-modules
+      changed_when: false
+      register: caddy_verify_modules
+
+    - name: Read the build stamp and the unit
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      register: caddy_verify_files
+      loop:
+        - /usr/local/src/caddy/build.stamp
+        - /etc/systemd/system/caddy.service
+
+    - name: Read the installed Go version
+      ansible.builtin.command: /usr/local/go/bin/go version
+      changed_when: false
+      register: caddy_verify_go
+
+    - name: Verify the built binary matches what was requested
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services['caddy.service'].state == 'running'
+          # The pin is the point: an unpinned build follows upstream releases
+          # and swaps the binary under a running edge node.
+          - "'v2.11.4' in caddy_verify_version.stdout"
+          - "'storage.redis' in caddy_verify_modules.stdout"
+          - caddy_verify_go.stdout.split(' ')[2] == 'go1.26.7'
+
+    - name: Verify the build stamp records the requested build
+      ansible.builtin.assert:
+        that:
+          - "'caddy=v2.11.4' in caddy_verify_stamp"
+          - "'go=1.26.7' in caddy_verify_stamp"
+          - "'modules=github.com/pberkel/caddy-storage-redis' in caddy_verify_stamp"
+      vars:
+        caddy_verify_stamp: "{{ caddy_verify_files.results[0].content | b64decode }}"
+
+    # --environ prints every variable in the drop-in — which is the documented
+    # home for ACME provider tokens — into the journal on every start.
+    - name: Verify the role-owned unit does not dump its environment
+      ansible.builtin.assert:
+        that:
+          - "'ExecStart=/usr/bin/caddy run --config /etc/caddy/Caddyfile' in caddy_verify_unit"
+          - >-
+            'ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force'
+            in caddy_verify_unit
+          - caddy_verify_exec_lines | select('search', '--environ') | list | length == 0
+      vars:
+        caddy_verify_unit: "{{ caddy_verify_files.results[1].content | b64decode }}"
+        caddy_verify_exec_lines: >-
+          {{ caddy_verify_unit | regex_findall('^Exec.*$', multiline=True) }}
+
+    - name: Probe the proxied site
+      ansible.builtin.uri:
+        url: http://127.0.0.1:80/
+        headers:
+          Host: xcaddy.example.invalid
+        follow_redirects: none
+        status_code: [502, 503]

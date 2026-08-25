@@ -1,0 +1,31 @@
+---
+- name: Converge
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    # The path this stack actually runs in production: a binary built with a
+    # third-party module, which is where the version pinning and the rebuild
+    # stamp have to hold. Everything is pinned so a build here is reproducible
+    # and a rebuild is only ever triggered by editing these values.
+    caddy_install_method: xcaddy
+    caddy_version: v2.11.4
+    caddy_go_version: "1.26.7"
+    caddy_xcaddy_version: v0.4.7
+    caddy_extra_modules:
+      - github.com/pberkel/caddy-storage-redis
+
+    caddy_acme_email: acme@example.invalid
+    caddy_global_extra: |
+      auto_https off
+
+    # The unit this role owns must keep this out of the journal.
+    caddy_systemd_env:
+      CADDY_TEST_TOKEN: not-a-real-secret
+
+    caddy_sites:
+      - host: http://xcaddy.example.invalid
+        upstream: 127.0.0.1:8081
+        access_log: true
+  roles:
+    - role: "{{ playbook_dir }}/../.."  # noqa: role-name[path]
