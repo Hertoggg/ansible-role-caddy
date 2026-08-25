@@ -229,12 +229,13 @@ they land in are not world-readable:
 | `{{ caddy_data_dir }}` (certs, ACME keys) | `caddy:caddy` | `0750` |
 | `<host>.access.log` | `caddy:caddy` | `0600` |
 
-The unit this role installs on the `xcaddy` path deliberately runs Caddy without
-`--environ`, which would otherwise print every variable from the drop-in into the
-journal at startup. **On the `apt` path the unit belongs to the package and does
-carry `--environ`**, so a token in `caddy_systemd_env` is written to the journal
-there; either accept it (the journal is not world-readable) or override
-`ExecStart` from your own drop-in.
+Neither install path prints those variables into the journal. The unit this role
+installs on the `xcaddy` path runs Caddy without `--environ`; on the `apt` path
+the unit belongs to the package and does carry the flag, so when
+`caddy_systemd_env` is non-empty the drop-in resets `ExecStart` and redefines it
+without it. Set `caddy_systemd_hide_environ: false` to keep the package's
+invocation verbatim — worth doing if a future package revision adds a flag to
+`ExecStart` that matters to you.
 
 ## Tags
 
@@ -352,8 +353,8 @@ idempotence check:
 
 | Scenario | Covers |
 | --- | --- |
-| `default` | the `apt` path, and the full site matrix — allowlists, per-path rules, snippets, load balancing, health checks, access logs, metrics |
-| `xcaddy` | the build path: a pinned Caddy + module, the rebuild stamp, the role-owned unit |
+| `default` | the `apt` path, and the full site matrix — allowlists, per-path rules, snippets, load balancing, health checks, access logs, metrics, and that the drop-in keeps its variables out of the journal |
+| `xcaddy` | the build path: a pinned Caddy + module, the rebuild stamp, the role-owned unit, and certificates stored in Redis rather than on disk |
 
 ```sh
 python3 -m venv .venv && . .venv/bin/activate
@@ -369,6 +370,14 @@ The `default` scenario addresses its sites as `http://…` and sets `auto_https 
 so the container never reaches for a certificate: Caddy puts TLS on any site whose
 address carries a port other than 80, and a plain request to that listener is
 answered with 400.
+
+The `xcaddy` scenario does issue certificates, through `local_certs` and a Redis
+store, and asserts they land in Redis with nothing left under the data directory.
+Real ACME needs a publicly reachable address, so the issuer differs from
+production while the storage path — the part that lets two nodes behind one
+floating IP share a certificate store — is the same. What a single container
+cannot show is the second node reading that store, or a floating IP moving
+between them; the VIP belongs to keepalived, not to this role.
 
 ---
 

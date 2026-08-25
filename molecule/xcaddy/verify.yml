@@ -64,6 +64,52 @@
         caddy_verify_exec_lines: >-
           {{ caddy_verify_unit | regex_findall('^Exec.*$', multiline=True) }}
 
+    # The point of the storage module: certificates must land in Redis, not on
+    # local disk, or two nodes behind one floating IP cannot share a store and
+    # the passive node can never renew. redis-cli is the only way to look.
+    - name: Read the certificate store  # noqa: command-instead-of-module
+      ansible.builtin.command: redis-cli --scan --pattern 'caddy*'
+      changed_when: false
+      register: caddy_verify_store
+      until: caddy_verify_store.stdout_lines | length > 0
+      retries: 10
+      delay: 3
+
+    - name: Look for certificates left on local disk
+      ansible.builtin.find:
+        paths: "{{ caddy_data_dir | default('/var/lib/caddy') }}"
+        patterns: ["*.crt", "*.key"]
+        recurse: true
+      register: caddy_verify_local_certs
+
+    - name: Verify the certificate store is Redis and not the filesystem
+      ansible.builtin.assert:
+        that:
+          - caddy_verify_store.stdout is search('caddy/certificates')
+          - caddy_verify_store.stdout is search('caddy/pki/authorities/local')
+          - caddy_verify_local_certs.files | length == 0
+        fail_msg: >-
+          Redis holds {{ caddy_verify_store.stdout_lines | length }} keys and
+          {{ caddy_verify_local_certs.files | length }} certificate files were
+          found under the data directory.
+
+    # A successful handshake proves the certificate came back out of Redis and
+    # was served. curl, because the uri module cannot set SNI and Caddy needs it
+    # to pick the certificate.
+    - name: Probe the TLS site  # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -sS -k -o /dev/null -w '%{http_code}'
+        --resolve tls.example.invalid:443:127.0.0.1
+        https://tls.example.invalid/
+      changed_when: false
+      register: caddy_verify_tls
+
+    - name: Verify the TLS site answers from the shared store
+      ansible.builtin.assert:
+        that:
+          - caddy_verify_tls.stdout in ['502', '503']
+        fail_msg: "TLS probe returned {{ caddy_verify_tls.stdout }}"
+
     - name: Probe the proxied site
       ansible.builtin.uri:
         url: http://127.0.0.1:80/

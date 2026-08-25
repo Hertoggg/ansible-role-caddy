@@ -104,9 +104,16 @@ caddy_caddyfile_template: Caddyfile.j2
 #   GODEBUG: tlsmlkem=0
 #
 # These routinely carry ACME provider tokens, so the drop-in is written
-# root-owned and group-readable only, and the unit does not run Caddy with
-# --environ (which would print every variable into the journal at startup).
+# root-owned and group-readable only.
 caddy_systemd_env: {}
+
+# Keep the variables above out of the journal. The unit this role installs on
+# the xcaddy path never runs Caddy with --environ; on the apt path the unit
+# belongs to the package and does, so when there is something to protect the
+# drop-in resets ExecStart and redefines it without the flag. Set to false to
+# keep the package's invocation verbatim — worth doing if a future package
+# revision adds a flag to ExecStart that matters to you.
+caddy_systemd_hide_environ: true
 
 # ----------------------------------------------------------------------------
 # TLS / global options

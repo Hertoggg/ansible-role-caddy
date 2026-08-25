@@ -16,16 +16,33 @@
       - github.com/pberkel/caddy-storage-redis
 
     caddy_acme_email: acme@example.invalid
+
+    # The clustering mechanism this stack depends on: certificates and the
+    # issuance lock live in Redis instead of on local disk, which is what lets
+    # two nodes behind one floating IP share a store. Real ACME needs a public
+    # address, so local_certs substitutes Caddy's internal CA — the issuer
+    # changes, the storage path being exercised does not.
     caddy_global_extra: |
-      auto_https off
+      local_certs
+      storage redis {
+          address 127.0.0.1:6379
+          db 0
+          key_prefix caddy
+      }
 
     # The unit this role owns must keep this out of the journal.
     caddy_systemd_env:
       CADDY_TEST_TOKEN: not-a-real-secret
 
     caddy_sites:
+      # Plain HTTP, for the proxy probe.
       - host: http://xcaddy.example.invalid
         upstream: 127.0.0.1:8081
         access_log: true
+
+      # A bare hostname, so Caddy provisions a certificate for it through the
+      # storage module above.
+      - host: tls.example.invalid
+        upstream: 127.0.0.1:8081
   roles:
     - role: "{{ playbook_dir }}/../.."  # noqa: role-name[path]

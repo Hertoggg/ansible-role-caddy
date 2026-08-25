@@ -1,0 +1,23 @@
+---
+# Test infrastructure only: a Redis server for Caddy's certificate store to
+# point at, and curl for a TLS probe the uri module cannot make (it cannot set
+# SNI, which is how Caddy picks a certificate).
+- name: Prepare
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Install the test dependencies
+      ansible.builtin.apt:
+        name:
+          - redis-server
+          - curl
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Start Redis
+      ansible.builtin.systemd:
+        name: redis-server
+        state: started
+        enabled: true

@@ -29,6 +29,7 @@ scenario:
     - destroy
     - syntax
     - create
+    - prepare
     - converge
     - check
     - idempotence

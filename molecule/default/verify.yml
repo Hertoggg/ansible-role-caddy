@@ -79,6 +79,21 @@
     # Every load-balancing and health-check option must reach the proxy block
     # under the name Caddy expects. `caddy validate` already ran over this file,
     # so a name Caddy does not know would have failed the deploy, not this.
+    # There is no systemd module for reading a unit property, and the effective
+    # ExecStart is the only thing that proves the drop-in's reset took: the
+    # packaged unit on this path carries --environ, which would print the whole
+    # drop-in into the journal at startup.
+    - name: Read the effective ExecStart  # noqa: command-instead-of-module
+      ansible.builtin.command: systemctl show -p ExecStart caddy
+      changed_when: false
+      register: caddy_verify_execstart
+
+    - name: Verify the packaged unit no longer dumps its environment
+      ansible.builtin.assert:
+        that:
+          - "'--environ' not in caddy_verify_execstart.stdout"
+          - "'/usr/bin/caddy run --config /etc/caddy/Caddyfile' in caddy_verify_execstart.stdout"
+
     - name: Verify every proxy option reaches the rendered block
       ansible.builtin.assert:
         that:
