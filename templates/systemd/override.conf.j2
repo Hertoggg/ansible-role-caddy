@@ -1,4 +1,12 @@
 [Service]
+{% if caddy_install_method == 'apt' and caddy_systemd_env and caddy_systemd_hide_environ %}
+# The packaged unit runs Caddy with --environ, which prints every variable
+# below into the journal at every start — and caddy_systemd_env is the
+# documented home for ACME provider tokens. Reset ExecStart and redefine it
+# without that flag; the rest of the invocation is the package's own.
+ExecStart=
+ExecStart=/usr/bin/caddy run --config {{ caddy_caddyfile }}
+{% endif %}
 {% for key, value in caddy_systemd_env.items() %}
 Environment="{{ key }}={{ value }}"
 {% endfor %}

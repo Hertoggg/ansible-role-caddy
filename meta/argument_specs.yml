@@ -1,0 +1,142 @@
+---
+argument_specs:
+  main:
+    short_description: Install Caddy and render a validated reverse-proxy configuration.
+    description:
+      - >-
+        Installs Caddy from its apt repository or builds a pinned binary with
+        xcaddy, renders a Caddyfile from a declarative site list, validates it
+        before replacing the live file, and manages the systemd service.
+      - >-
+        Site keys are validated here, so a mistyped option fails the play
+        instead of rendering a site block without it.
+    author:
+      - JJstreams
+    options:
+      caddy_install_method:
+        type: str
+        choices: [apt, xcaddy]
+      caddy_extra_modules:
+        type: list
+        elements: str
+      caddy_version:
+        type: str
+      caddy_go_version:
+        type: str
+      caddy_go_checksum:
+        type: str
+      caddy_go_arch_map:
+        type: dict
+      caddy_xcaddy_version:
+        type: str
+      caddy_build_dir:
+        type: path
+      caddy_xcaddy_env:
+        type: dict
+      caddy_apt_cache_valid_time:
+        type: int
+      caddy_apt_lock_timeout:
+        type: int
+      caddy_apt_package_state:
+        type: str
+        choices: [present, latest]
+      caddy_config_dir:
+        type: path
+      caddy_caddyfile:
+        type: path
+      caddy_data_dir:
+        type: path
+      caddy_log_dir:
+        type: path
+      caddy_user:
+        type: str
+      caddy_group:
+        type: str
+      caddy_caddyfile_template:
+        type: str
+      caddy_systemd_env:
+        type: dict
+      caddy_systemd_hide_environ:
+        type: bool
+      caddy_acme_email:
+        type: str
+      caddy_acme_dns:
+        type: str
+      caddy_global_extra:
+        type: str
+      caddy_sites:
+        type: list
+        elements: dict
+        options:
+          host:
+            type: str
+            required: true
+          upstream:
+            type: str
+            required: true
+          lb_policy:
+            type: str
+          lb_retries:
+            type: int
+          lb_try_duration:
+            type: str
+          lb_try_interval:
+            type: str
+          health_uri:
+            type: str
+          health_port:
+            type: int
+          health_interval:
+            type: str
+          health_timeout:
+            type: str
+          health_status:
+            type: str
+          health_body:
+            type: str
+          fail_duration:
+            type: str
+          max_fails:
+            type: int
+          unhealthy_status:
+            type: list
+            elements: str
+          unhealthy_latency:
+            type: str
+          unhealthy_request_count:
+            type: int
+          upstream_tls_skip_verify:
+            type: bool
+          access_log:
+            type: bool
+          allow_ips:
+            type: list
+            elements: str
+          protected_paths:
+            type: list
+            elements: dict
+            options:
+              path:
+                type: str
+                required: true
+              allow_ips:
+                type: list
+                elements: str
+                required: true
+          import_snippets:
+            type: list
+            elements: str
+          import_files:
+            type: list
+            elements: str
+          extra_directives:
+            type: str
+      caddy_snippets:
+        type: dict
+      caddy_metrics_bind:
+        type: str
+      caddy_metrics_port:
+        type: int
+      caddy_metrics_allow_ips:
+        type: list
+        elements: str

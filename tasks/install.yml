@@ -13,172 +13,292 @@
       - gnupg
     state: present
     update_cache: true
+    cache_valid_time: "{{ caddy_apt_cache_valid_time }}"
+    lock_timeout: "{{ caddy_apt_lock_timeout }}"
+  when: caddy_install_method == 'apt'
+
+- name: Ensure the apt keyring directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
   when: caddy_install_method == 'apt'
 
 - name: Add Caddy apt signing key
   ansible.builtin.get_url:
     url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
     dest: /etc/apt/keyrings/caddy-stable.asc
-    mode: '0644'
+    owner: root
+    group: root
+    mode: "0644"
   when: caddy_install_method == 'apt'
 
+# Binary packages only: nothing here builds Caddy from Debian sources, and a
+# deb-src line makes every `apt update` fetch a second index for nothing.
 - name: Add Caddy apt repository
   ansible.builtin.copy:
     dest: /etc/apt/sources.list.d/caddy-stable.list
     content: |
-      deb [signed-by=/etc/apt/keyrings/caddy-stable.asc] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main
-      deb-src [signed-by=/etc/apt/keyrings/caddy-stable.asc] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main
-    mode: '0644'
+      deb [signed-by=/etc/apt/keyrings/caddy-stable.asc] {{ caddy_apt_repo_url }} any-version main
+    owner: root
+    group: root
+    mode: "0644"
   when: caddy_install_method == 'apt'
 
 - name: Install Caddy from apt
   ansible.builtin.apt:
     name: caddy
-    state: present
+    state: "{{ caddy_apt_package_state }}"
     update_cache: true
+    cache_valid_time: "{{ caddy_apt_cache_valid_time }}"
+    lock_timeout: "{{ caddy_apt_lock_timeout }}"
   when: caddy_install_method == 'apt'
 
 # ===========================================================================
 # xcaddy build (opt-in, for extra modules)
 # ===========================================================================
+# The build is expensive and swaps the binary that serves production traffic,
+# so it is driven by a stamp rather than run on every play: build.stamp records
+# the version, module list and toolchain the installed binary came from, and
+# the build only re-runs when the request no longer matches it. Without that,
+# every deploy rebuilt from scratch and picked up whatever Caddy release
+# happened to be current, restarting the service to install it.
 
-- name: Install Go for xcaddy build
+- name: Set up the xcaddy build
   when: caddy_install_method == 'xcaddy'
   block:
-    - name: Install xcaddy build prerequisites
-      ansible.builtin.apt:
-        name:
-          - ca-certificates
-          - git
-        state: present
-        update_cache: true
+    - name: Ensure the build directory exists
+      ansible.builtin.file:
+        path: "{{ caddy_build_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
 
-    - name: Download Go tarball
-      ansible.builtin.get_url:
-        url: "https://go.dev/dl/go{{ caddy_go_version }}.linux-amd64.tar.gz"
-        dest: "/tmp/go{{ caddy_go_version }}.linux-amd64.tar.gz"
-        mode: '0644'
+    - name: Describe the requested build
+      ansible.builtin.set_fact:
+        caddy_build_signature: >-
+          caddy={{ caddy_version | default('latest', true) }}
+          go={{ caddy_go_version }}
+          modules={{ caddy_extra_modules | sort | join(',') }}
 
-    - name: Extract Go
-      ansible.builtin.unarchive:
-        src: "/tmp/go{{ caddy_go_version }}.linux-amd64.tar.gz"
-        dest: /usr/local
-        remote_src: true
-        creates: /usr/local/go/bin/go
+    # xcaddy and the go toolchain shell out to a bare `go`, so the toolchain
+    # has to be on PATH for both the install and the build.
+    - name: Compose the build PATH
+      ansible.builtin.set_fact:
+        caddy_build_path: >-
+          /usr/local/go/bin:{{ ansible_env.PATH | default('/usr/bin:/bin', true) }}
 
-# xcaddy and the go toolchain shell out to a bare `go`, so /usr/local/go/bin
-# must be on PATH for both tasks below.
-- name: Install xcaddy
-  ansible.builtin.command:
-    cmd: /usr/local/go/bin/go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
-    creates: /root/go/bin/xcaddy
-  environment:
-    HOME: /root
-    GOPATH: /root/go
-    PATH: "/usr/local/go/bin:{{ ansible_env.PATH | default('/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin') }}"
-  when: caddy_install_method == 'xcaddy'
+    - name: Compose the build environment
+      ansible.builtin.set_fact:
+        caddy_build_env: >-
+          {{ {'HOME': '/root', 'GOPATH': '/root/go', 'PATH': caddy_build_path}
+             | combine(caddy_xcaddy_env) }}
 
-# Build to a staging path, then install via checksum-aware copy: the
-# restart handler only fires when the binary actually changed, and the
-# live binary is never half-written if the build dies midway.
-- name: Build Caddy with extra modules
-  ansible.builtin.command:
-    cmd: >
-      /root/go/bin/xcaddy build
-      {{ caddy_extra_modules | map('regex_replace', '^(.+)$', '--with \1') | join(' ') }}
-      --output /root/go/caddy-staging
-  environment: "{{ {
-      'HOME': '/root',
-      'GOPATH': '/root/go',
-      'PATH': '/usr/local/go/bin:' ~ (ansible_env.PATH | default('/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin')),
-    } | combine(caddy_xcaddy_env) }}"
-  changed_when: false
-  when:
-    - caddy_install_method == 'xcaddy'
-    - caddy_extra_modules | length > 0
+    - name: Check for an installed Caddy binary
+      ansible.builtin.stat:
+        path: /usr/bin/caddy
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+      register: caddy_binary
 
-- name: Install built Caddy binary
-  ansible.builtin.copy:
-    src: /root/go/caddy-staging
-    dest: /usr/bin/caddy
-    remote_src: true
-    owner: root
-    group: root
-    mode: '0755'
-  when:
-    - caddy_install_method == 'xcaddy'
-    - caddy_extra_modules | length > 0
-  notify: restart caddy
+    - name: Read the stamp of the installed build
+      ansible.builtin.slurp:
+        src: "{{ caddy_build_dir }}/build.stamp"
+      register: caddy_installed_stamp
+      failed_when: false
 
-- name: Ensure caddy group exists (xcaddy does not create it)
-  ansible.builtin.group:
-    name: "{{ caddy_group }}"
-    system: true
-  when: caddy_install_method == 'xcaddy'
+    - name: Decide whether Caddy must be rebuilt
+      ansible.builtin.set_fact:
+        caddy_build_required: >-
+          {{ not caddy_binary.stat.exists
+             or caddy_installed_stamp.content is not defined
+             or (caddy_installed_stamp.content | b64decode | trim)
+                != (caddy_build_signature | trim) }}
 
-- name: Ensure caddy user exists (xcaddy does not create it)
-  ansible.builtin.user:
-    name: "{{ caddy_user }}"
-    group: "{{ caddy_group }}"
-    system: true
-    home: "{{ caddy_data_dir }}"
-    createhome: true
-    shell: /usr/sbin/nologin
-  when: caddy_install_method == 'xcaddy'
+    - name: Report the build decision
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Building Caddy: ' ~ (caddy_build_signature | trim)
+             if caddy_build_required | bool
+             else 'Caddy already built from ' ~ (caddy_build_signature | trim)
+                  ~ ', skipping build' }}
 
-- name: Install caddy.service unit (xcaddy — apt ships its own)
-  ansible.builtin.copy:
-    dest: /etc/systemd/system/caddy.service
-    mode: '0644'
-    content: |
-      [Unit]
-      Description=Caddy
-      Documentation=https://caddyserver.com/docs/
-      After=network.target network-online.target
-      Requires=network-online.target
+    - name: Install the Go toolchain
+      when: caddy_build_required | bool
+      block:
+        # `creates:` used to guard the extraction, which meant a bumped
+        # caddy_go_version was downloaded and then never unpacked on any host
+        # that already had a toolchain. Compare the installed version instead.
+        - name: Check the installed Go version
+          ansible.builtin.command: /usr/local/go/bin/go version
+          register: caddy_go_installed
+          changed_when: false
+          failed_when: false
 
-      [Service]
-      Type=notify
-      User={{ caddy_user }}
-      Group={{ caddy_group }}
-      ExecStart=/usr/bin/caddy run --environ --config {{ caddy_caddyfile }}
-      ExecReload=/usr/bin/caddy reload --config {{ caddy_caddyfile }} --force
-      TimeoutStopSec=5s
-      LimitNOFILE=1048576
-      PrivateTmp=true
-      ProtectSystem=full
-      AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+        - name: Remove a mismatched Go toolchain
+          ansible.builtin.file:
+            path: /usr/local/go
+            state: absent
+          when:
+            - caddy_go_installed.rc == 0
+            - caddy_go_installed.stdout.split(' ')[2] | default('') != 'go' ~ caddy_go_version
 
-      [Install]
-      WantedBy=multi-user.target
-  when: caddy_install_method == 'xcaddy'
-  notify: restart caddy
+        - name: Download Go tarball
+          ansible.builtin.get_url:
+            url: >-
+              https://go.dev/dl/go{{ caddy_go_version }}.linux-{{
+              caddy_go_arch_map[ansible_facts.architecture] }}.tar.gz
+            dest: "{{ caddy_build_dir }}/go{{ caddy_go_version }}.tar.gz"
+            checksum: "{{ caddy_go_checksum | default(omit, true) }}"
+            owner: root
+            group: root
+            mode: "0644"
+          when: caddy_go_installed.rc != 0
+                or caddy_go_installed.stdout.split(' ')[2] | default('') != 'go' ~ caddy_go_version
+
+        - name: Extract Go
+          ansible.builtin.unarchive:
+            src: "{{ caddy_build_dir }}/go{{ caddy_go_version }}.tar.gz"
+            dest: /usr/local
+            remote_src: true
+            creates: /usr/local/go/bin/go
+
+        - name: Remove the Go tarball
+          ansible.builtin.file:
+            path: "{{ caddy_build_dir }}/go{{ caddy_go_version }}.tar.gz"
+            state: absent
+
+    - name: Build and install Caddy
+      when: caddy_build_required | bool
+      block:
+        - name: Install xcaddy build prerequisites
+          ansible.builtin.apt:
+            name:
+              - ca-certificates
+              - git
+            state: present
+            update_cache: true
+            cache_valid_time: "{{ caddy_apt_cache_valid_time }}"
+            lock_timeout: "{{ caddy_apt_lock_timeout }}"
+
+        - name: Install xcaddy
+          ansible.builtin.command: >-
+            /usr/local/go/bin/go install
+            github.com/caddyserver/xcaddy/cmd/xcaddy@{{ caddy_xcaddy_version }}
+          environment:
+            HOME: /root
+            GOPATH: /root/go
+            PATH: "{{ caddy_build_path }}"
+          changed_when: true
+
+        # Builds to a staging path, then installs via checksum-aware copy: the
+        # restart handler only fires when the binary actually changed, and the
+        # live binary is never half-written if the build dies midway. The build
+        # itself touches nothing outside the build directory, hence
+        # changed_when: false — the copy below reports the real change.
+        - name: Build Caddy with extra modules
+          ansible.builtin.command:
+            cmd: >-
+              /root/go/bin/xcaddy build {{ caddy_version }}
+              {{ caddy_extra_modules | map('regex_replace', '^(.+)$', '--with \1') | join(' ') }}
+              --output {{ caddy_build_dir }}/caddy-staging
+          environment: "{{ caddy_build_env }}"
+          changed_when: false
+
+        - name: Install built Caddy binary
+          ansible.builtin.copy:
+            src: "{{ caddy_build_dir }}/caddy-staging"
+            dest: /usr/bin/caddy
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0755"
+          notify: Restart caddy
+
+        # Last, so an interrupted run re-builds instead of recording a build
+        # that was never installed.
+        - name: Record the installed build
+          ansible.builtin.copy:
+            dest: "{{ caddy_build_dir }}/build.stamp"
+            content: "{{ caddy_build_signature | trim }}\n"
+            owner: root
+            group: root
+            mode: "0644"
+
+    - name: Ensure caddy group exists (xcaddy does not create it)
+      ansible.builtin.group:
+        name: "{{ caddy_group }}"
+        system: true
+
+    - name: Ensure caddy user exists (xcaddy does not create it)
+      ansible.builtin.user:
+        name: "{{ caddy_user }}"
+        group: "{{ caddy_group }}"
+        system: true
+        home: "{{ caddy_data_dir }}"
+        create_home: false
+        shell: /usr/sbin/nologin
+
+    - name: Install caddy.service unit (xcaddy — apt ships its own)
+      ansible.builtin.template:
+        src: systemd/caddy.service.j2
+        dest: /etc/systemd/system/caddy.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart caddy
 
 # ===========================================================================
-# Shared: directories, systemd drop-in, service state
+# Shared: directories, systemd drop-in
 # ===========================================================================
 
-- name: Ensure Caddy directories exist
+# Config is root-owned and only group-readable: caddy_global_extra routinely
+# carries a storage backend password, so the rendered Caddyfile is a secret,
+# and the service has no business rewriting its own configuration.
+- name: Ensure the Caddy config directory exists
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: "{{ caddy_config_dir }}"
+    state: directory
+    owner: root
+    group: "{{ caddy_group }}"
+    mode: "0750"
+
+# Certificates and ACME account keys live here.
+- name: Ensure the Caddy data directory exists
+  ansible.builtin.file:
+    path: "{{ caddy_data_dir }}"
     state: directory
     owner: "{{ caddy_user }}"
     group: "{{ caddy_group }}"
-    mode: '0755'
-  loop:
-    - "{{ caddy_config_dir }}"
-    - "{{ caddy_data_dir }}"
-    - "{{ caddy_log_dir }}"
+    mode: "0750"
+
+- name: Ensure the Caddy log directory exists
+  ansible.builtin.file:
+    path: "{{ caddy_log_dir }}"
+    state: directory
+    owner: "{{ caddy_user }}"
+    group: "{{ caddy_group }}"
+    mode: "0755"
 
 - name: Create systemd drop-in directory
   ansible.builtin.file:
     path: /etc/systemd/system/caddy.service.d
     state: directory
-    mode: '0755'
+    owner: root
+    group: root
+    mode: "0755"
 
+# Group-readable only: caddy_systemd_env is the documented home for ACME
+# provider tokens.
 - name: Deploy systemd drop-in (environment overrides)
   ansible.builtin.template:
     src: systemd/override.conf.j2
     dest: /etc/systemd/system/caddy.service.d/override.conf
-    mode: '0644'
-  notify: restart caddy
+    owner: root
+    group: "{{ caddy_group }}"
+    mode: "0640"
+  notify: Restart caddy

@@ -1,24 +1,38 @@
 ---
+# preserve on both timestamps: without it `touch` rewrites mtime on every run
+# and the whole role reports changed forever, which hides the changes that
+# matter and fails an idempotence check.
+# The filename has to survive a site address that is not a bare hostname: a
+# Caddy site can legitimately be written as `http://host` or `:8080`, and both
+# turn into an unusable path. Kept in step with the same expression in
+# Caddyfile.j2.
 - name: Ensure declared Caddy access log files are writable by Caddy
   ansible.builtin.file:
-    path: "{{ caddy_log_dir }}/{{ item.host }}.access.log"
+    path: >-
+      {{ caddy_log_dir }}/{{ item.host
+         | regex_replace('[^A-Za-z0-9._-]', '_') }}.access.log
     state: touch
     owner: "{{ caddy_user }}"
     group: "{{ caddy_group }}"
-    mode: '0600'
+    mode: "0600"
+    modification_time: preserve
+    access_time: preserve
   loop: >-
     {{ caddy_sites
        | selectattr('access_log', 'defined')
        | selectattr('access_log')
        | list }}
 
+# Root-owned, group-readable: caddy_global_extra commonly carries the storage
+# backend password, so the rendered file is a secret. Caddy reads it as
+# {{ caddy_group }}, both at start and on `caddy reload`.
 - name: Deploy Caddyfile from template
   ansible.builtin.template:
     src: "{{ caddy_caddyfile_template }}"
     dest: "{{ caddy_caddyfile }}"
     owner: root
     group: "{{ caddy_group }}"
-    mode: '0644'
+    mode: "0640"
     validate: 'caddy validate --config %s --adapter caddyfile'
-  notify: reload caddy
+  notify: Reload caddy
   when: caddy_caddyfile_template | length > 0

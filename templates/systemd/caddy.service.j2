@@ -1,0 +1,28 @@
+# Managed by ansible-role-caddy. The apt path uses the unit shipped with the
+# package; this one exists for the xcaddy path, which installs no package.
+#
+# Deliberately no `--environ`: it prints the whole environment to the journal
+# at startup, and caddy_systemd_env is the documented place to put ACME
+# provider tokens.
+[Unit]
+Description=Caddy
+Documentation=https://caddyserver.com/docs/
+After=network.target network-online.target
+Requires=network-online.target
+
+[Service]
+Type=notify
+User={{ caddy_user }}
+Group={{ caddy_group }}
+ExecStart=/usr/bin/caddy run --config {{ caddy_caddyfile }}
+ExecReload=/usr/bin/caddy reload --config {{ caddy_caddyfile }} --force
+TimeoutStopSec=5s
+LimitNOFILE=1048576
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

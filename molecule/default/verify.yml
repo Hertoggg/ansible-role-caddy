@@ -1,0 +1,165 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Collect installed package facts
+      ansible.builtin.package_facts:
+        manager: apt
+
+    - name: Read the managed files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+      register: caddy_verify_stats
+      loop:
+        - /etc/caddy
+        - /etc/caddy/Caddyfile
+        - /etc/systemd/system/caddy.service.d/override.conf
+        - /var/log/caddy/http___open.example.invalid.access.log
+
+    - name: Read the rendered Caddyfile
+      ansible.builtin.slurp:
+        src: /etc/caddy/Caddyfile
+      register: caddy_verify_caddyfile
+
+    - name: Collect service facts
+      ansible.builtin.service_facts:
+
+    - name: Re-validate the live configuration
+      ansible.builtin.command: caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      changed_when: false
+
+    - name: Isolate the allowlisted site block
+      ansible.builtin.set_fact:
+        caddy_verify_allowed_block: >-
+          {{ (caddy_verify_caddyfile.content | b64decode)
+             | regex_search('allowed\.example\.invalid \{(.|\n)*?\n\}') }}
+
+    - name: Verify ownership and modes of the managed files
+      ansible.builtin.assert:
+        that:
+          - "'caddy' in ansible_facts.packages"
+          - ansible_facts.services['caddy.service'].state == 'running'
+          # Config dir and Caddyfile hold caddy_global_extra, which is where a
+          # storage backend password goes — not world-readable.
+          - caddy_verify_stats.results[0].stat.mode == '0750'
+          - caddy_verify_stats.results[0].stat.pw_name == 'root'
+          - caddy_verify_stats.results[0].stat.gr_name == 'caddy'
+          - caddy_verify_stats.results[1].stat.mode == '0640'
+          - caddy_verify_stats.results[1].stat.pw_name == 'root'
+          - caddy_verify_stats.results[1].stat.gr_name == 'caddy'
+          # The drop-in is the documented place for ACME provider tokens.
+          - caddy_verify_stats.results[2].stat.mode == '0640'
+          - caddy_verify_stats.results[2].stat.pw_name == 'root'
+          - caddy_verify_stats.results[3].stat.mode == '0600'
+          - caddy_verify_stats.results[3].stat.pw_name == 'caddy'
+
+    - name: Verify the rendered configuration
+      ansible.builtin.assert:
+        that:
+          - "'auto_https off' in (caddy_verify_caddyfile.content | b64decode)"
+          - "'@not_allowed not remote_ip 192.0.2.0/24' in (caddy_verify_caddyfile.content | b64decode)"
+          # An allowlisted site keeps everything declared alongside allow_ips:
+          # load balancing, active health checks and imported snippets. Before
+          # the deny-first rewrite, allow_ips silently dropped all three.
+          - "'@not_allowed not remote_ip 127.0.0.1/32' in caddy_verify_allowed_block"
+          - "'lb_policy ip_hash' in caddy_verify_allowed_block"
+          - "'health_uri /healthz' in caddy_verify_allowed_block"
+          - "'import compress' in caddy_verify_allowed_block"
+          # A site address that is not a bare hostname still yields a usable
+          # access log path.
+          - >-
+            'output file /var/log/caddy/http___open.example.invalid.access.log'
+            in (caddy_verify_caddyfile.content | b64decode)
+
+    # Every load-balancing and health-check option must reach the proxy block
+    # under the name Caddy expects. `caddy validate` already ran over this file,
+    # so a name Caddy does not know would have failed the deploy, not this.
+    # There is no systemd module for reading a unit property, and the effective
+    # ExecStart is the only thing that proves the drop-in's reset took: the
+    # packaged unit on this path carries --environ, which would print the whole
+    # drop-in into the journal at startup.
+    - name: Read the effective ExecStart  # noqa: command-instead-of-module
+      ansible.builtin.command: systemctl show -p ExecStart caddy
+      changed_when: false
+      register: caddy_verify_execstart
+
+    - name: Verify the packaged unit no longer dumps its environment
+      ansible.builtin.assert:
+        that:
+          - "'--environ' not in caddy_verify_execstart.stdout"
+          - "'/usr/bin/caddy run --config /etc/caddy/Caddyfile' in caddy_verify_execstart.stdout"
+
+    - name: Verify every proxy option reaches the rendered block
+      ansible.builtin.assert:
+        that:
+          - item in (caddy_verify_caddyfile.content | b64decode)
+        fail_msg: "{{ item }} is missing from the rendered Caddyfile"
+      loop:
+        - lb_policy ip_hash
+        - lb_try_duration 5s
+        - lb_try_interval 250ms
+        - health_uri /healthz
+        - health_port 8081
+        - health_interval 10s
+        - health_timeout 3s
+        - health_status 2xx
+        - health_body OK
+        - fail_duration 30s
+        - max_fails 2
+        - unhealthy_status 5xx
+        - unhealthy_latency 2s
+        - unhealthy_request_count 20
+
+    # Blocked requests must end at 403, proxied ones must reach reverse_proxy
+    # and fail there against the deliberately closed upstream ports.
+    - name: Probe the rendered sites
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:80{{ item.path }}"
+        headers:
+          Host: "{{ item.host }}"
+        follow_redirects: none
+        status_code: [200, 403, 502, 503]
+      register: caddy_verify_probes
+      loop:
+        - host: denied.example.invalid
+          path: /
+          expect: [403]
+        - host: allowed.example.invalid
+          path: /
+          expect: [502, 503]
+        - host: open.example.invalid
+          path: /admin/secret
+          expect: [403]
+        - host: open.example.invalid
+          path: /
+          expect: [502, 503]
+      loop_control:
+        label: "{{ item.host }}{{ item.path }}"
+
+    - name: Probe the metrics endpoint
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9090/metrics
+        return_content: true
+      register: caddy_verify_metrics
+
+    - name: Verify the access decisions
+      ansible.builtin.assert:
+        that:
+          - item.status in item.item.expect
+        fail_msg: >-
+          {{ item.item.host }}{{ item.item.path }} returned {{ item.status }},
+          expected one of {{ item.item.expect | join(', ') }}.
+      loop: "{{ caddy_verify_probes.results }}"
+      loop_control:
+        label: "{{ item.item.host }}{{ item.item.path }}"
+
+    - name: Verify the metrics endpoint answers allowed clients
+      ansible.builtin.assert:
+        that:
+          - caddy_verify_metrics.status == 200
+          - "'caddy_http_requests_total' in caddy_verify_metrics.content"
