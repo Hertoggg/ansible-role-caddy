@@ -4,7 +4,7 @@
 # ----------------------------------------------------------------------------
 
 # "apt"    — install from Caddy's official cloudsmith apt repo (default)
-# "xcaddy" — build a custom binary; requires caddy_extra_modules to be useful
+# "xcaddy" — build a custom binary; requires caddy_extra_modules to be set
 caddy_install_method: apt
 
 # Only used when caddy_install_method: xcaddy
@@ -13,16 +13,67 @@ caddy_install_method: apt
 #   - github.com/caddyserver/cache-handler
 caddy_extra_modules: []
 
-# Go version to install when using xcaddy (ignored for apt)
+# Caddy version to build, as an xcaddy version argument (a git tag on
+# caddyserver/caddy), e.g. "v2.10.2". Empty means "whatever xcaddy resolves as
+# latest at build time" — fine for a lab, but pin it for anything that serves
+# traffic: an unpinned build silently moves Caddy forward the moment upstream
+# tags a release, and the new binary is installed and restarted by whatever
+# deploy happens to run next.
+#
+# Changing this value (or caddy_extra_modules / caddy_go_version) is what
+# triggers a rebuild — see caddy_build_dir below.
+caddy_version: ""
+
+# Go version to install when using xcaddy (ignored for apt). Must be new
+# enough for the Caddy version being built; too old is a build failure.
+# Bumping this replaces an already-installed toolchain.
 caddy_go_version: "1.22"
 
+# Optional checksum for the Go tarball, in ansible.builtin.get_url format
+# ("sha256:<hex>"). Empty skips verification. The published value lives at
+# https://go.dev/dl/ next to the tarball.
+caddy_go_checksum: ""
+
+# ansible_facts.architecture -> Go release architecture. Extend for a platform
+# that is not covered; an unmapped architecture fails in preflight.
+caddy_go_arch_map:
+  x86_64: amd64
+  aarch64: arm64
+
+# xcaddy version to install as the build tool itself. "latest" tracks
+# upstream; pin to a tag (e.g. "v0.4.4") for a fully reproducible build.
+caddy_xcaddy_version: latest
+
+# Role-owned scratch directory for the xcaddy build: holds the staged binary
+# before it is installed over the live one, plus build.stamp — the record of
+# what the installed binary was built from. The stamp is what makes the build
+# skippable: as long as it matches the requested version, module list and Go
+# version, the build is not re-run.
+caddy_build_dir: /usr/local/src/caddy
+
 # Extra environment variables for the xcaddy build command, merged over the
-# defaults (HOME, GOPATH). Needed e.g. to build private modules:
+# defaults (HOME, GOPATH, PATH). Needed e.g. to build private modules:
 #   caddy_xcaddy_env:
 #     GOPRIVATE: "github.com/myuser/*"
 # (git credentials for the private fetch must be provided separately,
 # e.g. a /root/.netrc deployed by the calling playbook)
 caddy_xcaddy_env: {}
+
+# apt behaviour, matching the surrounding roles: refresh the cache only when
+# it is older than this, and wait rather than fail when another process holds
+# the dpkg lock.
+caddy_apt_cache_valid_time: 3600
+caddy_apt_lock_timeout: 60
+
+# Base URL of Caddy's apt repository. Only the binary index is added; nothing
+# in this role builds from Debian sources.
+caddy_apt_repo_url: https://dl.cloudsmith.io/public/caddy/stable/deb/debian
+
+# State for the packaged caddy on the apt path. "present" installs and then
+# leaves the version alone; "latest" upgrades to whatever the repo currently
+# offers on every run. Ignored on the xcaddy path, which never installs the
+# package.
+caddy_apt_package_state: present
 
 # ----------------------------------------------------------------------------
 # Paths & ownership
@@ -51,6 +102,10 @@ caddy_caddyfile_template: Caddyfile.j2
 # Environment variables injected into the caddy.service drop-in.
 # Key-value dict, e.g.:
 #   GODEBUG: tlsmlkem=0
+#
+# These routinely carry ACME provider tokens, so the drop-in is written
+# root-owned and group-readable only, and the unit does not run Caddy with
+# --environ (which would print every variable into the journal at startup).
 caddy_systemd_env: {}
 
 # ----------------------------------------------------------------------------
@@ -92,13 +147,19 @@ caddy_acme_dns: ""
 #         password "{{ vault_redis_password }}"
 #         db 3
 #     }
+#
+# Quote any value that can contain a space or a Caddyfile metacharacter —
+# an unquoted password breaks the parse, and the failure surfaces as a
+# validation error on a file this role will not show you.
 caddy_global_extra: ""
 
 # ----------------------------------------------------------------------------
 # Sites
 # ----------------------------------------------------------------------------
 
-# List of reverse-proxy sites. Each entry supports:
+# List of reverse-proxy sites. Every key is validated against
+# meta/argument_specs.yml, so a typo fails the play instead of silently
+# rendering a site without the option you meant to set. Each entry supports:
 #   host:             required — public hostname
 #   upstream:         required — backend address (host:port). Several,
 #                                space-separated, makes this a load-balanced
@@ -122,13 +183,17 @@ caddy_global_extra: ""
 #                                up on a request
 #   access_log:       optional — enable per-site JSON access log at
 #                                {{ caddy_log_dir }}/<host>.access.log
-#   allow_ips:        optional — whole-site IP allowlist (list of IPs/CIDRs)
+#   allow_ips:        optional — whole-site IP allowlist (list of IPs/CIDRs).
+#                                Clients outside it get 403; everything else
+#                                declared on the site still applies.
 #   protected_paths:  optional — list of { path, allow_ips } for per-path restrictions
 #   import_snippets:  optional — list of caddy_snippets names to `import` into the site
 #   import_files:     optional — list of file paths to `import` into the site (e.g. a
 #                                runtime-managed snippet owned by another process)
 #   extra_directives: optional — raw Caddyfile directives injected verbatim into the
 #                                site block, just before reverse_proxy (multi-line ok)
+#   upstream_tls_skip_verify: optional — proxy over HTTPS without verifying the
+#                                upstream certificate
 caddy_sites: []
 
 # Reusable Caddy snippets, rendered as `(name) { body }` at the top of the
@@ -148,8 +213,10 @@ caddy_sites: []
 #     encode zstd gzip
 caddy_snippets: {}
 
-# Expose a Prometheus metrics + health endpoint on this address/port.
+# Expose a Prometheus metrics endpoint on this address/port, over plain HTTP.
 # Set caddy_metrics_bind to "" to disable the metrics server entirely.
+# An empty caddy_metrics_allow_ips exposes it to every client that can reach
+# the bind address.
 caddy_metrics_bind: ""
 caddy_metrics_port: 9090
 caddy_metrics_allow_ips: []

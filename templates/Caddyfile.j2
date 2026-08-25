@@ -23,8 +23,11 @@
 
 {% endfor %}
 {% if caddy_metrics_bind %}
-# Prometheus metrics endpoint — restricted to allowed IPs.
-{{ caddy_metrics_bind }}:{{ caddy_metrics_port }} {
+# Prometheus metrics endpoint — restricted to allowed IPs. Addressed as http://
+# on purpose: Caddy puts TLS on any site whose address carries a port other
+# than 80, which for a bare address here means a certificate for an IP from the
+# internal CA, and a scrape target no Prometheus will talk to out of the box.
+http://{{ caddy_metrics_bind }}:{{ caddy_metrics_port }} {
     bind {{ caddy_metrics_bind }}
 {% if caddy_metrics_allow_ips | length > 0 %}
     @allowed remote_ip {{ caddy_metrics_allow_ips | join(' ') }}
@@ -48,7 +51,8 @@
 {{ site.host }} {
 {% if site.access_log | default(false) %}
     log {
-        output file {{ caddy_log_dir }}/{{ site.host }}.access.log {
+        output file {{ caddy_log_dir }}/{{ site.host
+            | regex_replace('[^A-Za-z0-9._-]', '_') }}.access.log {
             roll_size 100MiB
             roll_keep 7
             roll_keep_for 48h
@@ -57,14 +61,14 @@
     }
 {% endif %}
 {% if site.allow_ips | default([]) | length > 0 %}
-    @allowed remote_ip {{ site.allow_ips | join(' ') }}
-    handle @allowed {
-        reverse_proxy {{ site.upstream }}
-    }
-    handle {
+    # Whole-site allowlist, expressed as a deny for everyone else so that
+    # everything declared below it — per-path rules, imports, load balancing
+    # and health checks — still applies to the clients that are allowed in.
+    @not_allowed not remote_ip {{ site.allow_ips | join(' ') }}
+    handle @not_allowed {
         respond "Forbidden" 403
     }
-{% else %}
+{% endif %}
 {% for p in site.protected_paths | default([]) %}
 {% set idx = loop.index %}
 {% set raw_path = p.path %}
@@ -107,7 +111,6 @@
     }
 {% else %}
     reverse_proxy {{ site.upstream }}
-{% endif %}
 {% endif %}
 }
 

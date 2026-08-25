@@ -1,4 +1,8 @@
 ---
+- name: Run preflight checks
+  ansible.builtin.import_tasks: preflight.yml
+  tags: [caddy, install, config]
+
 - name: Run install tasks
   ansible.builtin.import_tasks: install.yml
   tags: [caddy, install]
@@ -7,6 +11,9 @@
   ansible.builtin.import_tasks: config.yml
   tags: [caddy, config]
 
+# After config, not at the end of install.yml: on the xcaddy path there is no
+# package-provided /etc/caddy/Caddyfile, so starting before the template has
+# been rendered exits with "no such file or directory".
 - name: Enable and start Caddy
   ansible.builtin.systemd:
     name: caddy
