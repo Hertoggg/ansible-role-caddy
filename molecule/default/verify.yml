@@ -8,6 +8,20 @@
       ansible.builtin.package_facts:
         manager: apt
 
+    - name: Read available Caddy package versions
+      ansible.builtin.command: apt-cache madison caddy
+      changed_when: false
+      register: caddy_verify_apt_versions
+
+    - name: Verify Caddy was installed from the official repository
+      ansible.builtin.assert:
+        that:
+          - >-
+            ansible_facts.packages['caddy'][0].version in
+            (caddy_verify_apt_versions.stdout
+             | regex_findall('\|\s*(\S+)\s*\|\s*https://dl\.cloudsmith\.io/'))
+        fail_msg: Caddy must come from Cloudsmith on the first converge, not Debian's cached index.
+
     - name: Read the managed files
       ansible.builtin.stat:
         path: "{{ item }}"
@@ -31,6 +45,8 @@
 
     - name: Re-validate the live configuration
       ansible.builtin.command: caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      environment:
+        CADDY_TEST_HTTP_PORT: "80"
       changed_when: false
 
     - name: Isolate the allowlisted site block

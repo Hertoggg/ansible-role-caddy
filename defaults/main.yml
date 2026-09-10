@@ -27,7 +27,7 @@ caddy_version: ""
 # Go version to install when using xcaddy (ignored for apt). Must be new
 # enough for the Caddy version being built; too old is a build failure.
 # Bumping this replaces an already-installed toolchain.
-caddy_go_version: "1.22"
+caddy_go_version: "1.26.8"
 
 # Optional checksum for the Go tarball, in ansible.builtin.get_url format
 # ("sha256:<hex>"). Empty skips verification. The published value lives at
