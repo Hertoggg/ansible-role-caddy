@@ -39,13 +39,13 @@
           # and swaps the binary under a running edge node.
           - "'v2.11.4' in caddy_verify_version.stdout"
           - "'storage.redis' in caddy_verify_modules.stdout"
-          - caddy_verify_go.stdout.split(' ')[2] == 'go1.26.7'
+          - caddy_verify_go.stdout.split(' ')[2] == 'go1.26.8'
 
     - name: Verify the build stamp records the requested build
       ansible.builtin.assert:
         that:
           - "'caddy=v2.11.4' in caddy_verify_stamp"
-          - "'go=1.26.7' in caddy_verify_stamp"
+          - "'go=1.26.8' in caddy_verify_stamp"
           - "'modules=github.com/pberkel/caddy-storage-redis' in caddy_verify_stamp"
       vars:
         caddy_verify_stamp: "{{ caddy_verify_files.results[0].content | b64decode }}"

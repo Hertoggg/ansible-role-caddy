@@ -34,5 +34,10 @@
     group: "{{ caddy_group }}"
     mode: "0640"
     validate: 'caddy validate --config %s --adapter caddyfile'
+  # Validation provisions modules too, so DNS/storage credentials must match
+  # the service environment. Neither diffs nor validation errors may log them.
+  environment: "{{ caddy_systemd_env }}"
+  diff: false
+  no_log: true
   notify: Reload caddy
   when: caddy_caddyfile_template | length > 0

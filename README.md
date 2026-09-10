@@ -36,7 +36,7 @@ ones:
 | `caddy_apt_repo_url` | cloudsmith | Base URL of Caddy's apt repository |
 | `caddy_extra_modules` | `[]` | Module import paths, only used with `xcaddy` |
 | `caddy_version` | `""` | Caddy git tag to build. Empty builds whatever is latest — pin it for anything serving traffic |
-| `caddy_go_version` | `"1.22"` | Go toolchain for `xcaddy` builds. Bumping it replaces an installed toolchain |
+| `caddy_go_version` | `"1.26.8"` | Go toolchain for `xcaddy` builds. Bumping it replaces an installed toolchain |
 | `caddy_go_checksum` | `""` | Optional `sha256:…` for the Go tarball |
 | `caddy_go_arch_map` | amd64/arm64 | `ansible_facts.architecture` → Go release architecture |
 | `caddy_xcaddy_version` | `latest` | xcaddy version used as the build tool |
@@ -258,6 +258,11 @@ the unit belongs to the package and does carry the flag, so when
 without it. Set `caddy_systemd_hide_environ: false` to keep the package's
 invocation verbatim — worth doing if a future package revision adds a flag to
 `ExecStart` that matters to you.
+
+The Caddyfile and environment drop-in tasks suppress Ansible output, including
+`--diff` and validation errors, because they can contain credentials. Caddyfile
+validation receives `caddy_systemd_env`, just like the running service, so
+environment-backed DNS and storage credentials are available during validation.
 
 ## Tags
 
