@@ -55,5 +55,7 @@
           rules:
             - name: test_user
               pattern: ^/user/(?P<key>[^/]+)(?:/|$)
+        extra_directives: |
+          respond /private "Forbidden" 403
   roles:
     - role: "{{ playbook_dir }}/../.."  # noqa: role-name[path]

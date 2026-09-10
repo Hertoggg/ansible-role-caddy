@@ -98,6 +98,8 @@
               pattern: ^/user/(?P<key>[^/]+)(?:/|$)
         health_uri: /healthz
         fail_duration: 30s
+        extra_directives: |
+          respond /private "Forbidden" 403
 
       # Allowlisted site that does NOT include the test client.
       - host: http://denied.example.invalid

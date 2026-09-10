@@ -116,32 +116,32 @@ http://{{ caddy_metrics_bind }}:{{ caddy_metrics_port }} {
     @request_affinity_{{ loop.index }} path_regexp {{ rule.name }} {{ rule.pattern }}
 {% endfor %}
 
-    # Derive the routing key from the request path. The incoming header is
-    # always removed first and never forwarded, so clients cannot select a
-    # backend by spoofing this implementation detail.
+    # Derive the routing key from the request path. Keep only these header
+    # mutations in route: wrapping reverse_proxy here would move it ahead of
+    # top-level access denials such as respond directives.
     route {
         request_header -{{ request_affinity.header }}
 {% for rule in request_affinity.rules %}
         request_header @request_affinity_{{ loop.index }} {{ request_affinity.header }} {{ '{re.' ~ rule.name ~ '.key}' }}
 {% endfor %}
-        reverse_proxy {{ site.upstream }} {
+    }
+    reverse_proxy {{ site.upstream }} {
 {% if request_affinity.fallback_policy != 'random' %}
-            lb_policy header {{ request_affinity.header }} {
-                fallback {{ request_affinity.fallback_policy }}
-            }
+        lb_policy header {{ request_affinity.header }} {
+            fallback {{ request_affinity.fallback_policy }}
+        }
 {% else %}
-            lb_policy header {{ request_affinity.header }}
+        lb_policy header {{ request_affinity.header }}
 {% endif %}
 {% for opt in rp_opts %}
-            {{ opt }}
+        {{ opt }}
 {% endfor %}
-            header_up -{{ request_affinity.header }}
+        header_up -{{ request_affinity.header }}
 {% if site.upstream_tls_skip_verify | default(false) %}
-            transport http {
-                tls_insecure_skip_verify
-            }
-{% endif %}
+        transport http {
+            tls_insecure_skip_verify
         }
+{% endif %}
     }
 {% else %}
 {% if rp_opts or site.upstream_tls_skip_verify | default(false) %}

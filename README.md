@@ -132,10 +132,12 @@ caddy_sites:
   header before deriving the key and removes it again before proxying, so it is
   neither client-controlled nor an application interface. Caddy's directive
   sorting would otherwise move the unconditional removal around the matched
-  setters, so the role wraps the sequence in `route`. Every pattern must contain
-  a named `(?P<key>...)` capture. Enabled affinity is mutually exclusive with
-  `lb_policy`; `enabled: false` allows a caller to stage the configuration while
-  retaining its existing policy. `fallback_policy: random` emits Caddy's
+  setters, so the role wraps only that header sequence in `route`. The proxy
+  remains top-level so `respond` and other access directives retain Caddy's
+  normal precedence over it. Every pattern must contain a named `(?P<key>...)`
+  capture. Enabled affinity is mutually exclusive with `lb_policy`; `enabled:
+  false` allows a caller to stage the configuration while retaining its existing
+  policy. `fallback_policy: random` emits Caddy's
   backward-compatible implicit default; any other fallback requires a Caddy
   release that supports nested selection-policy blocks.
 - `access_log: true` → the role pre-creates `{{ caddy_log_dir }}/<host>.access.log`

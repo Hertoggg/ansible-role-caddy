@@ -147,6 +147,11 @@
         - host: open.example.invalid
           path: /
           expect: [502, 503]
+        # Regression: putting reverse_proxy inside the affinity route made it
+        # execute before this site's top-level respond access denial.
+        - host: affinity.example.invalid
+          path: /private
+          expect: [403]
       loop_control:
         label: "{{ item.host }}{{ item.path }}"
 

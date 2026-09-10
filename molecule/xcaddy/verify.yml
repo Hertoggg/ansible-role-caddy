@@ -78,6 +78,14 @@
       vars:
         caddy_verify_caddyfile: "{{ caddy_verify_files.results[2].content | b64decode }}"
 
+    - name: Verify request affinity preserves access denials
+      ansible.builtin.uri:
+        url: http://127.0.0.1:80/private
+        headers:
+          Host: affinity.example.invalid
+        follow_redirects: none
+        status_code: 403
+
     # The point of the storage module: certificates must land in Redis, not on
     # local disk, or two nodes behind one floating IP cannot share a store and
     # the passive node can never renew. redis-cli is the only way to look.
