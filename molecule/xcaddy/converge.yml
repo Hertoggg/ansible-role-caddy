@@ -10,7 +10,7 @@
     # and a rebuild is only ever triggered by editing these values.
     caddy_install_method: xcaddy
     caddy_version: v2.11.4
-    caddy_go_version: "1.26.7"
+    # Exercise the role's default Go release, including its download URL.
     caddy_xcaddy_version: v0.4.7
     caddy_extra_modules:
       - github.com/pberkel/caddy-storage-redis

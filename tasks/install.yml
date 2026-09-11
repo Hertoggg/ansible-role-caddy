@@ -45,14 +45,17 @@
     owner: root
     group: root
     mode: "0644"
+  register: caddy_apt_repository
   when: caddy_install_method == 'apt'
 
+# The prerequisites may have just refreshed the cache before this source was
+# added. Fetch its index immediately instead of installing Debian's package.
 - name: Install Caddy from apt
   ansible.builtin.apt:
     name: caddy
     state: "{{ caddy_apt_package_state }}"
     update_cache: true
-    cache_valid_time: "{{ caddy_apt_cache_valid_time }}"
+    cache_valid_time: "{{ 0 if caddy_apt_repository is changed else caddy_apt_cache_valid_time }}"
     lock_timeout: "{{ caddy_apt_lock_timeout }}"
   when: caddy_install_method == 'apt'
 
@@ -301,4 +304,6 @@
     owner: root
     group: "{{ caddy_group }}"
     mode: "0640"
+  diff: false
+  no_log: true
   notify: Restart caddy

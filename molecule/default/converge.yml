@@ -18,9 +18,13 @@
     # trying to reach an ACME endpoint from a container with no network.
     caddy_global_extra: |
       auto_https off
+      # This cannot validate unless the service environment reaches Ansible's
+      # validation command as well as systemd.
+      http_port {$CADDY_TEST_HTTP_PORT}
 
     caddy_systemd_env:
       GODEBUG: tlsmlkem=0
+      CADDY_TEST_HTTP_PORT: "80"
 
     caddy_metrics_bind: 127.0.0.1
     caddy_metrics_allow_ips:
