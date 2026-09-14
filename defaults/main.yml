@@ -27,7 +27,7 @@ caddy_version: ""
 # Go version to install when using xcaddy (ignored for apt). Must be new
 # enough for the Caddy version being built; too old is a build failure.
 # Bumping this replaces an already-installed toolchain.
-caddy_go_version: "1.22"
+caddy_go_version: "1.26.8"
 
 # Optional checksum for the Go tarball, in ansible.builtin.get_url format
 # ("sha256:<hex>"). Empty skips verification. The published value lives at
@@ -107,6 +107,15 @@ caddy_caddyfile_template: Caddyfile.j2
 # root-owned and group-readable only.
 caddy_systemd_env: {}
 
+# Where those variables are written, and the only place they exist on disk: the
+# drop-in pulls the file in with EnvironmentFile= and Caddyfile validation reads
+# it back with `caddy validate --envfile`. Handing them to the validating task
+# as an Ansible `environment` instead would prepend every value to the module's
+# command line, where any local user can read them out of `ps` for as long as
+# the play runs. Written root-owned and group-readable, like the drop-in, and
+# removed again when caddy_systemd_env is empty.
+caddy_systemd_env_file: "{{ caddy_config_dir }}/caddy.env"
+
 # Keep the variables above out of the journal. The unit this role installs on
 # the xcaddy path never runs Caddy with --environ; on the apt path the unit
 # belongs to the package and does, so when there is something to protect the
@@ -114,6 +123,18 @@ caddy_systemd_env: {}
 # keep the package's invocation verbatim — worth doing if a future package
 # revision adds a flag to ExecStart that matters to you.
 caddy_systemd_hide_environ: true
+
+# ----------------------------------------------------------------------------
+# Debugging
+# ----------------------------------------------------------------------------
+
+# Hide the tasks that write secrets — the Caddyfile and the environment file —
+# from Ansible's output. The cost is that a Caddyfile Caddy refuses to validate
+# fails with nothing but "the output has been hidden", no directive, line number
+# or path, which is the role's most common failure. Set to false for a single
+# debugging run to get the validator's message back; do not leave it off, the
+# same output carries whatever caddy_global_extra and caddy_systemd_env hold.
+caddy_no_log: true
 
 # ----------------------------------------------------------------------------
 # TLS / global options

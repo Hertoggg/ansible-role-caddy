@@ -56,7 +56,11 @@ argument_specs:
         type: str
       caddy_systemd_env:
         type: dict
+      caddy_systemd_env_file:
+        type: path
       caddy_systemd_hide_environ:
+        type: bool
+      caddy_no_log:
         type: bool
       caddy_acme_email:
         type: str

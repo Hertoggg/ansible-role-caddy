@@ -18,9 +18,13 @@
     # trying to reach an ACME endpoint from a container with no network.
     caddy_global_extra: |
       auto_https off
+      # This cannot validate unless the service environment reaches Ansible's
+      # validation command as well as systemd.
+      http_port {$CADDY_TEST_HTTP_PORT}
 
     caddy_systemd_env:
       GODEBUG: tlsmlkem=0
+      CADDY_TEST_HTTP_PORT: "80"
 
     caddy_metrics_bind: 127.0.0.1
     caddy_metrics_allow_ips:
@@ -89,10 +93,13 @@
         upstream: 127.0.0.1:8081 127.0.0.1:8082
         request_affinity:
           header: X-Role-Affinity-Key
-          # The apt scenario currently receives Caddy 2.6, from before custom
-          # fallback blocks. The pinned production-version scenario covers a
-          # non-default least_conn fallback separately.
-          fallback_policy: random
+          # A non-default policy, so this scenario renders the nested fallback
+          # block rather than the bare lb_policy line — the apt path reaches a
+          # current Caddy now, and used to be excused from this on the grounds
+          # that it received 2.6. Deliberately not least_conn: that value
+          # belongs to the disabled-affinity site above, and verify proves it
+          # renders nothing.
+          fallback_policy: round_robin
           rules:
             - name: test_user
               pattern: ^/user/(?P<key>[^/]+)(?:/|$)
