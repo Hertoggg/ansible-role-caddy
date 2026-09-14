@@ -9,7 +9,9 @@ Two install paths:
 
 - **`apt`** (default) — Caddy's official cloudsmith repo. Covers everything the
   bundled HTTP handlers do (`reverse_proxy`, `metrics`, `file_server`,
-  `respond`, `remote_ip`, …).
+  `respond`, `remote_ip`, …). A host already carrying the distribution's `caddy`
+  package is moved onto this repository's build, since `present` alone would
+  leave it on the older one indefinitely.
 - **`xcaddy`** — builds a custom binary when you need third-party modules
   (e.g. DNS providers for ACME-DNS, `cache-handler`, geoip). Opt in with
   `caddy_install_method: xcaddy` + `caddy_extra_modules`.
@@ -48,7 +50,9 @@ ones:
 | `caddy_acme_email` | `""` | ACME contact for Let's Encrypt |
 | `caddy_acme_dns` | `""` | Global DNS-01 provider + args (`acme_dns <value>`). Needed for wildcard certs and split-horizon/internal HTTPS |
 | `caddy_global_extra` | `""` | Raw directives injected verbatim into the global options block (e.g. a clustered `storage` backend) |
-| `caddy_systemd_env` | `{}` | Env vars injected via a systemd drop-in |
+| `caddy_systemd_env` | `{}` | Env vars for the service, e.g. ACME provider tokens |
+| `caddy_systemd_env_file` | `{{ caddy_config_dir }}/caddy.env` | Where those vars are written; read by systemd and by Caddyfile validation |
+| `caddy_no_log` | `true` | Keep the secret-bearing tasks out of the log. `false` for one run to read a validation failure |
 | `caddy_metrics_bind` | `""` | Bind address for the metrics server. `""` disables it |
 | `caddy_metrics_port` | `9090` | Metrics server port |
 | `caddy_metrics_allow_ips` | `[]` | IPs/CIDRs allowed to reach `/metrics` |
@@ -247,6 +251,7 @@ they land in are not world-readable:
 | --- | --- | --- |
 | `{{ caddy_config_dir }}` | `root:caddy` | `0750` |
 | `{{ caddy_caddyfile }}` | `root:caddy` | `0640` |
+| `{{ caddy_systemd_env_file }}` | `root:caddy` | `0640` |
 | `caddy.service.d/override.conf` | `root:caddy` | `0640` |
 | `{{ caddy_data_dir }}` (certs, ACME keys) | `caddy:caddy` | `0750` |
 | `<host>.access.log` | `caddy:caddy` | `0600` |
@@ -259,10 +264,27 @@ without it. Set `caddy_systemd_hide_environ: false` to keep the package's
 invocation verbatim — worth doing if a future package revision adds a flag to
 `ExecStart` that matters to you.
 
-The Caddyfile and environment drop-in tasks suppress Ansible output, including
-`--diff` and validation errors, because they can contain credentials. Caddyfile
-validation receives `caddy_systemd_env`, just like the running service, so
-environment-backed DNS and storage credentials are available during validation.
+`caddy_systemd_env` is written to `caddy_systemd_env_file` and nowhere else: the
+drop-in pulls it in with `EnvironmentFile=`, and Caddyfile validation reads the
+same file with `caddy validate --envfile`, so environment-backed DNS and storage
+credentials are available during validation the way they are to the running
+service. Passing them to the validating task as an Ansible `environment` would
+work too, but Ansible implements that by prepending `VAR='value'` to the module's
+command line, where any local user on the managed node can read them out of `ps`
+until the play ends.
+
+The file is written with single-quoted values — the one form systemd and Caddy
+parse identically. Caddy's `--envfile` parser cuts a value at the first `#`
+regardless of quoting, so a value containing `#` or `'` cannot mean the same
+thing to the validator and to the running service; preflight rejects both rather
+than let them diverge silently.
+
+The tasks that write the Caddyfile and the environment file suppress Ansible
+output, including `--diff` and validation errors, because both carry credentials.
+The cost is that a Caddyfile Caddy refuses to validate fails with nothing but
+"the output has been hidden" — no directive, line number or path. Run once with
+`caddy_no_log: false` to get the validator's message back, and put it back
+afterwards.
 
 ## Tags
 

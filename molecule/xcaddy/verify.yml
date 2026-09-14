@@ -31,6 +31,15 @@
       changed_when: false
       register: caddy_verify_go
 
+    # Derived, not hard-coded: this scenario deliberately leaves
+    # caddy_go_version unpinned so the default download URL is exercised, and a
+    # literal here would make the next Go bump fail CI in an unrelated file.
+    - name: Read the Go version the role defaults to
+      ansible.builtin.set_fact:
+        caddy_verify_go_version: >-
+          {{ (lookup('file', playbook_dir ~ '/../../defaults/main.yml')
+              | from_yaml).caddy_go_version }}
+
     - name: Verify the built binary matches what was requested
       ansible.builtin.assert:
         that:
@@ -39,13 +48,13 @@
           # and swaps the binary under a running edge node.
           - "'v2.11.4' in caddy_verify_version.stdout"
           - "'storage.redis' in caddy_verify_modules.stdout"
-          - caddy_verify_go.stdout.split(' ')[2] == 'go1.26.8'
+          - caddy_verify_go.stdout.split(' ')[2] == ('go' ~ caddy_verify_go_version)
 
     - name: Verify the build stamp records the requested build
       ansible.builtin.assert:
         that:
           - "'caddy=v2.11.4' in caddy_verify_stamp"
-          - "'go=1.26.8' in caddy_verify_stamp"
+          - "('go=' ~ caddy_verify_go_version) in caddy_verify_stamp"
           - "'modules=github.com/pberkel/caddy-storage-redis' in caddy_verify_stamp"
       vars:
         caddy_verify_stamp: "{{ caddy_verify_files.results[0].content | b64decode }}"

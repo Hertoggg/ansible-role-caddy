@@ -33,11 +33,17 @@
     owner: root
     group: "{{ caddy_group }}"
     mode: "0640"
-    validate: 'caddy validate --config %s --adapter caddyfile'
-  # Validation provisions modules too, so DNS/storage credentials must match
-  # the service environment. Neither diffs nor validation errors may log them.
-  environment: "{{ caddy_systemd_env }}"
+    # Validation provisions modules too, so DNS/storage credentials have to
+    # reach the validator as well as the service. --envfile reads them out of
+    # the root-owned file they already live in; handing them to this task as an
+    # Ansible `environment` would prepend every value to the module's command
+    # line instead, readable by any local user through `ps` until the play ends.
+    validate: >-
+      caddy validate --config %s --adapter caddyfile
+      {{ ' --envfile ' ~ caddy_systemd_env_file if caddy_systemd_env else '' }}
+  # Neither a diff nor a validation error may carry those credentials into the
+  # log. caddy_no_log: false trades that back for a readable validation failure.
   diff: false
-  no_log: true
+  no_log: "{{ caddy_no_log }}"
   notify: Reload caddy
   when: caddy_caddyfile_template | length > 0

@@ -33,6 +33,24 @@
       '{{ ansible_facts.architecture }}'. Extend caddy_go_arch_map.
   when: caddy_install_method == 'xcaddy'
 
+# Both readers of the environment file have a limit the role cannot quote its
+# way around. Caddy's --envfile parser cuts a value at the first '#' whether or
+# not it is quoted, and single quotes — the one form systemd and Caddy read
+# alike — cannot carry a literal '. Either character would reach `caddy
+# validate` as something other than what systemd hands the running service,
+# silently and only on the validating side, so refuse it here instead.
+- name: Verify the service environment survives both of its parsers
+  ansible.builtin.assert:
+    that:
+      - caddy_systemd_env[item] | string is not search("[#']")
+    fail_msg: >-
+      caddy_systemd_env['{{ item }}'] contains ' or #, which
+      {{ caddy_systemd_env_file }} cannot represent to both systemd and
+      `caddy validate --envfile`. Use a value without either character.
+  # Looping over the keys, not the items: a failing item is printed, and the
+  # whole point of the environment file is that the values are not.
+  loop: "{{ caddy_systemd_env | list }}"
+
 - name: Verify request-affinity configuration
   ansible.builtin.assert:
     that:
