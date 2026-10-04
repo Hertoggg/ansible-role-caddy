@@ -24,6 +24,11 @@ Two install paths:
 - For the test suite: Docker, plus the pins in `requirements-test.txt`. See
   [Testing](#testing).
 
+The role-owned `xcaddy` systemd unit restarts Caddy after a failed start. This
+lets a node recover when a remote storage or DNS dependency becomes reachable
+shortly after boot; rendered configurations are validated before installation,
+so a bad managed Caddyfile is still rejected before it reaches the service.
+
 ## Role variables
 
 See [`defaults/main.yml`](defaults/main.yml) for the full list. The important
