@@ -59,6 +59,8 @@
           - >-
             'ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force'
             in caddy_verify_unit
+          - "'Restart=on-failure' in caddy_verify_unit"
+          - "'RestartSec=5s' in caddy_verify_unit"
           - caddy_verify_exec_lines | select('search', '--environ') | list | length == 0
       vars:
         caddy_verify_unit: "{{ caddy_verify_files.results[1].content | b64decode }}"
