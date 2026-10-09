@@ -84,6 +84,10 @@ caddy_caddyfile: /etc/caddy/Caddyfile
 caddy_data_dir: /var/lib/caddy
 caddy_log_dir: /var/log/caddy
 
+# Send access logs to the system journal instead of rotating files. This mode
+# removes paths, query strings and headers before any output is written.
+caddy_access_log_journal: false
+
 caddy_user: caddy
 caddy_group: caddy
 

@@ -1,5 +1,11 @@
 # ansible-role-caddy
 
+`caddy_access_log_journal` (default `false`) switches enabled access logs to
+stderr/journald with JSON fields. It removes request URI, request headers, TLS
+details and response headers before output, and adds site, upstream timing and
+the optional `X-JJstreams-Playback-Session` response header as a session ID.
+File logging remains the default. Deploy journal shipping in the caller.
+
 Installs and configures the [Caddy](https://caddyserver.com/) reverse proxy on
 Debian. Ships a generic Caddyfile template that turns a list of sites into
 reverse-proxy blocks with optional IP allowlists, per-path restrictions, an

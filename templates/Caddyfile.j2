@@ -1,4 +1,22 @@
 {
+{% if caddy_access_log_journal | bool %}
+    log default {
+        output stderr
+        format filter {
+            fields {
+                request>uri delete
+                request>headers delete
+                request>tls delete
+                resp_headers delete
+                err delete
+                error delete
+                trace delete
+                err_trace delete
+            }
+            wrap json
+        }
+    }
+{% endif %}
 {% if caddy_acme_email %}
     email {{ caddy_acme_email }}
 {% endif %}
@@ -51,6 +69,25 @@ http://{{ caddy_metrics_bind }}:{{ caddy_metrics_port }} {
 {{ site.host }} {
 {% if site.access_log | default(false) %}
     log {
+{% if caddy_access_log_journal | bool %}
+        output stderr
+        format append {
+            fields {
+                component playback
+                event caddy_access
+                site {{ site.host }}
+            }
+            wrap filter {
+                fields {
+                    request>uri delete
+                    request>headers delete
+                    request>tls delete
+                    resp_headers delete
+                }
+                wrap json
+            }
+        }
+{% else %}
         output file {{ caddy_log_dir }}/{{ site.host
             | regex_replace('[^A-Za-z0-9._-]', '_') }}.access.log {
             roll_size 100MiB
@@ -58,7 +95,14 @@ http://{{ caddy_metrics_bind }}:{{ caddy_metrics_port }} {
             roll_keep_for 48h
         }
         format json
+{% endif %}
     }
+{% if caddy_access_log_journal | bool %}
+    log_append edge_upstream_host {rp.upstream.host}
+    log_append edge_upstream_duration_ms {rp.upstream.duration_ms}
+    log_append edge_upstream_latency_ms {rp.upstream.latency_ms}
+    log_append session_id {http.response.header.X-JJstreams-Playback-Session}
+{% endif %}
 {% endif %}
 {% if site.allow_ips | default([]) | length > 0 %}
     # Whole-site allowlist, expressed as a deny for everyone else so that
