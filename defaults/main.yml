@@ -74,6 +74,7 @@ caddy_apt_repo_url: https://dl.cloudsmith.io/public/caddy/stable/deb/debian
 # offers on every run. Ignored on the xcaddy path, which never installs the
 # package.
 caddy_apt_package_state: present
+caddy_apt_package_version: ""
 
 # ----------------------------------------------------------------------------
 # Paths & ownership

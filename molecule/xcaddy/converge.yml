@@ -13,7 +13,7 @@
     caddy_go_version: "1.26.7"
     caddy_xcaddy_version: v0.4.7
     caddy_extra_modules:
-      - github.com/pberkel/caddy-storage-redis
+      - github.com/pberkel/caddy-storage-redis@v1.8.1
 
     caddy_acme_email: acme@example.invalid
 
@@ -45,8 +45,7 @@
       - host: tls.example.invalid
         upstream: 127.0.0.1:8081
 
-      # Validate the non-default fallback syntax against the exact Caddy
-      # release used by production, not the older package in the apt scenario.
+      # Validate the non-default fallback syntax in the custom build.
       - host: http://affinity.example.invalid
         upstream: 127.0.0.1:8081 127.0.0.1:8082
         request_affinity:

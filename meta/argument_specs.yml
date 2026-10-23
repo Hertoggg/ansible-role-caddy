@@ -40,6 +40,9 @@ argument_specs:
       caddy_apt_package_state:
         type: str
         choices: [present, latest]
+      caddy_apt_package_version:
+        type: str
+        description: Exact Debian package version; empty uses the configured package state.
       caddy_config_dir:
         type: path
       caddy_caddyfile:
