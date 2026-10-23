@@ -47,14 +47,61 @@
     mode: "0644"
   when: caddy_install_method == 'apt'
 
+# cache_valid_time: 0 unconditionally, not only when the source file above was
+# just written: the prerequisites may have refreshed the cache moments before
+# this source existed, and on a host whose file an earlier run already wrote,
+# the cached index never included it either. Refreshing does not make the task
+# report changed — with a package named, apt returns cache_updated separately
+# from changed — so idempotence is unaffected.
 - name: Install Caddy from apt
   ansible.builtin.apt:
     name: caddy
     state: "{{ caddy_apt_package_state }}"
     update_cache: true
-    cache_valid_time: "{{ caddy_apt_cache_valid_time }}"
+    cache_valid_time: 0
     lock_timeout: "{{ caddy_apt_lock_timeout }}"
   when: caddy_install_method == 'apt'
+
+# A fresh index is not enough on its own: `state: present` is satisfied by any
+# caddy package, including the one the distribution ships, so a host that
+# installed Debian's build before this repository was added stays on it forever
+# and nothing above notices. Compare what dpkg holds against what apt offers —
+# a version apt knows but this repository does not is the distribution's, and
+# that is the only case upgraded here. A version apt does not offer at all (a
+# manual install, or a release the repository has since dropped) is left alone,
+# so this never quietly turns `present` into `latest`.
+- name: Read the installed Caddy package version
+  ansible.builtin.command: dpkg-query --showformat=${Version} --show caddy
+  register: caddy_apt_installed
+  changed_when: false
+  failed_when: false
+  when: caddy_install_method == 'apt'
+
+- name: Read the Caddy versions apt offers
+  ansible.builtin.command: apt-cache madison caddy
+  register: caddy_apt_available
+  changed_when: false
+  when: caddy_install_method == 'apt'
+
+- name: Replace a distribution Caddy package with the official build  # noqa: package-latest
+  ansible.builtin.apt:
+    name: caddy
+    state: latest
+    lock_timeout: "{{ caddy_apt_lock_timeout }}"
+  vars:
+    caddy_apt_all_versions: >-
+      {{ caddy_apt_available.stdout | regex_findall('\|\s*(\S+)\s*\|') }}
+    caddy_apt_official_versions: >-
+      {{ caddy_apt_available.stdout
+         | regex_findall('\|\s*(\S+)\s*\|\s*' ~ (caddy_apt_repo_url | regex_escape)) }}
+  when:
+    - caddy_install_method == 'apt'
+    # Nothing recognisable as this repository's own — a caddy_apt_repo_url that
+    # does not match how apt prints it, say — means the comparison below cannot
+    # tell the two builds apart, so do nothing rather than upgrade on a guess.
+    - caddy_apt_official_versions | length > 0
+    - caddy_apt_installed.stdout in caddy_apt_all_versions
+    - caddy_apt_installed.stdout not in caddy_apt_official_versions
 
 # ===========================================================================
 # xcaddy build (opt-in, for extra modules)
@@ -292,8 +339,33 @@
     group: root
     mode: "0755"
 
-# Group-readable only: caddy_systemd_env is the documented home for ACME
-# provider tokens.
+# The single place caddy_systemd_env exists on disk, and the only one that
+# needs protecting: systemd reads it through the drop-in's EnvironmentFile= and
+# `caddy validate` reads it with --envfile, so the ACME provider tokens in it
+# never reach a command line.
+- name: Deploy the Caddy environment file
+  ansible.builtin.template:
+    src: systemd/env.j2
+    dest: "{{ caddy_systemd_env_file }}"
+    owner: root
+    group: "{{ caddy_group }}"
+    mode: "0640"
+  diff: false
+  no_log: "{{ caddy_no_log }}"
+  notify: Restart caddy
+  when: caddy_systemd_env | length > 0
+
+# systemd reads the file at every start, so one left behind by a previous run
+# would keep injecting credentials that are no longer configured.
+- name: Remove the Caddy environment file when nothing is configured
+  ansible.builtin.file:
+    path: "{{ caddy_systemd_env_file }}"
+    state: absent
+  notify: Restart caddy
+  when: caddy_systemd_env | length == 0
+
+# Names the environment file rather than carrying its values, so nothing here
+# is secret; the mode stays conservative because the path it points at is not.
 - name: Deploy systemd drop-in (environment overrides)
   ansible.builtin.template:
     src: systemd/override.conf.j2

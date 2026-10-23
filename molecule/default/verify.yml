@@ -8,6 +8,24 @@
       ansible.builtin.package_facts:
         manager: apt
 
+    - name: Read available Caddy package versions
+      ansible.builtin.command: apt-cache madison caddy
+      changed_when: false
+      register: caddy_verify_apt_versions
+
+    - name: Verify Caddy was installed from the official repository
+      ansible.builtin.assert:
+        that:
+          # First: the version lookup below dereferences the package, so
+          # without this the assert dies on an undefined attribute and the
+          # fail_msg never reaches the operator.
+          - "'caddy' in ansible_facts.packages"
+          - >-
+            ansible_facts.packages['caddy'][0].version in
+            (caddy_verify_apt_versions.stdout
+             | regex_findall('\|\s*(\S+)\s*\|\s*https://dl\.cloudsmith\.io/'))
+        fail_msg: Caddy must come from Cloudsmith on the first converge, not Debian's cached index.
+
     - name: Read the managed files
       ansible.builtin.stat:
         path: "{{ item }}"
@@ -20,6 +38,7 @@
         - /etc/caddy/Caddyfile
         - /etc/systemd/system/caddy.service.d/override.conf
         - /var/log/caddy/http___open.example.invalid.access.log
+        - /etc/caddy/caddy.env
 
     - name: Read the rendered Caddyfile
       ansible.builtin.slurp:
@@ -29,9 +48,19 @@
     - name: Collect service facts
       ansible.builtin.service_facts:
 
+    # --envfile, not an environment: the role validates this way too, and the
+    # global block below only adapts when CADDY_TEST_HTTP_PORT resolves — so
+    # this fails if the environment file is unreadable or the flag unsupported.
     - name: Re-validate the live configuration
-      ansible.builtin.command: caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      ansible.builtin.command: >-
+        caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+        --envfile /etc/caddy/caddy.env
       changed_when: false
+
+    - name: Read the systemd drop-in
+      ansible.builtin.slurp:
+        src: /etc/systemd/system/caddy.service.d/override.conf
+      register: caddy_verify_dropin
 
     - name: Isolate the allowlisted site block
       ansible.builtin.set_fact:
@@ -52,11 +81,15 @@
           - caddy_verify_stats.results[1].stat.mode == '0640'
           - caddy_verify_stats.results[1].stat.pw_name == 'root'
           - caddy_verify_stats.results[1].stat.gr_name == 'caddy'
-          # The drop-in is the documented place for ACME provider tokens.
           - caddy_verify_stats.results[2].stat.mode == '0640'
           - caddy_verify_stats.results[2].stat.pw_name == 'root'
           - caddy_verify_stats.results[3].stat.mode == '0600'
           - caddy_verify_stats.results[3].stat.pw_name == 'caddy'
+          # The environment file is where the ACME provider tokens live now, so
+          # it carries what the drop-in used to have to protect.
+          - caddy_verify_stats.results[4].stat.mode == '0640'
+          - caddy_verify_stats.results[4].stat.pw_name == 'root'
+          - caddy_verify_stats.results[4].stat.gr_name == 'caddy'
 
     - name: Verify the rendered configuration
       ansible.builtin.assert:
@@ -76,6 +109,9 @@
             'request_header @request_affinity_1 X-Role-Affinity-Key
             {re.test_user.key}' in (caddy_verify_caddyfile.content | b64decode)
           - "'lb_policy header X-Role-Affinity-Key' in (caddy_verify_caddyfile.content | b64decode)"
+          - "'fallback round_robin' in (caddy_verify_caddyfile.content | b64decode)"
+          # The disabled-affinity site declares least_conn and must render none
+          # of it.
           - "'fallback least_conn' not in (caddy_verify_caddyfile.content | b64decode)"
           - "'header_up -X-Role-Affinity-Key' in (caddy_verify_caddyfile.content | b64decode)"
           - "'X-Disabled-Affinity-Key' not in (caddy_verify_caddyfile.content | b64decode)"
@@ -102,6 +138,16 @@
         that:
           - "'--environ' not in caddy_verify_execstart.stdout"
           - "'/usr/bin/caddy run --config /etc/caddy/Caddyfile' in caddy_verify_execstart.stdout"
+
+    # Values in the drop-in would be values on the validation command line.
+    - name: Verify the drop-in names the environment file instead of inlining it
+      ansible.builtin.assert:
+        that:
+          - "'EnvironmentFile=/etc/caddy/caddy.env' in caddy_verify_dropin_text"
+          - "'CADDY_TEST_HTTP_PORT' not in caddy_verify_dropin_text"
+          - "'GODEBUG' not in caddy_verify_dropin_text"
+      vars:
+        caddy_verify_dropin_text: "{{ caddy_verify_dropin.content | b64decode }}"
 
     - name: Verify every proxy option reaches the rendered block
       ansible.builtin.assert:
