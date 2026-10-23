@@ -34,6 +34,7 @@
     group: root
     mode: "0644"
   when: caddy_install_method == 'apt'
+  register: caddy_apt_key
 
 # Binary packages only: nothing here builds Caddy from Debian sources, and a
 # deb-src line makes every `apt update` fetch a second index for nothing.
@@ -46,15 +47,30 @@
     group: root
     mode: "0644"
   when: caddy_install_method == 'apt'
+  register: caddy_apt_repository
+
+- name: Read installed packages before reconciling the Caddy pin
+  ansible.builtin.package_facts:
+    manager: apt
+  when:
+    - caddy_install_method == 'apt'
+    - caddy_apt_package_version | length > 0
 
 - name: Install Caddy from apt
   ansible.builtin.apt:
-    name: caddy
-    state: "{{ caddy_apt_package_state }}"
+    name: "caddy{{ '=' ~ caddy_apt_package_version if caddy_apt_package_version | length > 0 else '' }}"
+    state: "{{ 'present' if caddy_apt_package_version | length > 0 else caddy_apt_package_state }}"
     update_cache: true
-    cache_valid_time: "{{ caddy_apt_cache_valid_time }}"
+    cache_valid_time: >-
+      {{ 0 if (caddy_apt_key.changed | default(false))
+           or (caddy_apt_repository.changed | default(false))
+           or (caddy_apt_package_version | length > 0
+               and (ansible_facts.packages.caddy | default([])
+                    | map(attribute='version') | list) != [caddy_apt_package_version])
+         else caddy_apt_cache_valid_time }}
     lock_timeout: "{{ caddy_apt_lock_timeout }}"
   when: caddy_install_method == 'apt'
+  notify: Restart caddy
 
 # ===========================================================================
 # xcaddy build (opt-in, for extra modules)
@@ -82,6 +98,7 @@
         caddy_build_signature: >-
           caddy={{ caddy_version | default('latest', true) }}
           go={{ caddy_go_version }}
+          xcaddy={{ caddy_xcaddy_version }}
           modules={{ caddy_extra_modules | sort | join(',') }}
 
     # xcaddy and the go toolchain shell out to a bare `go`, so the toolchain

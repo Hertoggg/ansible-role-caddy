@@ -44,6 +44,7 @@ ones:
 | --- | --- | --- |
 | `caddy_install_method` | `apt` | `apt` or `xcaddy` |
 | `caddy_apt_package_state` | `present` | `latest` to let a run upgrade the packaged Caddy |
+| `caddy_apt_package_version` | `""` | Exact Debian package version; empty retains the package-state policy |
 | `caddy_apt_repo_url` | cloudsmith | Base URL of Caddy's apt repository |
 | `caddy_extra_modules` | `[]` | Module import paths, only used with `xcaddy` |
 | `caddy_version` | `""` | Caddy git tag to build. Empty builds whatever is latest — pin it for anything serving traffic |
@@ -228,18 +229,19 @@ how the jjstreams playbook in this repo factors out its shared admin allowlist
 
 The build is expensive and it replaces the binary that serves live traffic, so it
 is driven by a stamp rather than run on every play. `{{ caddy_build_dir }}/build.stamp`
-records the version, module list and Go toolchain the installed binary came from,
+records the Caddy version, module list, Go toolchain and xcaddy version the installed binary came from,
 and the build only re-runs when the request no longer matches it:
 
 ```yaml
 caddy_install_method: xcaddy
 caddy_version: v2.11.4                     # pin it
 caddy_go_version: "1.26.7"
+caddy_xcaddy_version: v0.4.7
 caddy_extra_modules:
-  - github.com/pberkel/caddy-storage-redis
+  - github.com/pberkel/caddy-storage-redis@v1.8.1
 ```
 
-Editing any of those three triggers exactly one rebuild; running the playbook
+Editing any of those pins triggers exactly one rebuild; running the playbook
 again does not. Leaving `caddy_version` empty means "whatever xcaddy resolves as
 latest **at build time**", which is fine for a lab and a bad idea for an edge
 node: the next unrelated deploy that happens to rebuild will move Caddy forward
